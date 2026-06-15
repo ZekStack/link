@@ -1,0 +1,28 @@
+# Errors
+
+Link uses `LinkErrorCode` for lifecycle, validation, allocation, HTTP transport, JSON, and cancellation failures.
+
+Common submission errors:
+
+| Code | Meaning |
+| --- | --- |
+| `NotInitialized` | Link is not running. |
+| `Stopping` | Link is shutting down. |
+| `QueueFull` | The request queue has no free slot. |
+| `InvalidUrl` | URL is missing or not HTTP/HTTPS. |
+| `UrlTooLarge` | URL exceeds `maxUrlSize`. |
+| `RequestTooLarge` | Request body exceeds `maxRequestBodySize`. |
+| `CallbackTooLarge` | Callback does not fit inline storage. |
+
+Common response errors:
+
+| Code | Meaning |
+| --- | --- |
+| `Timeout` | HTTP operation timed out. |
+| `TlsFailed` | Verified HTTPS could not be established. |
+| `ResponseTooLarge` | Buffered response exceeded `maxResponseBodySize`. |
+| `HeaderTooLarge` | Response headers exceeded configured limits. |
+| `JsonParseFailed` | JSON parsing failed or exceeded JSON limits. |
+| `Cancelled` | Request was cancelled during shutdown or by stream callback. |
+
+HTTP status codes are not Link errors. A valid `404` response is still a successful transport response.
