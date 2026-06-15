@@ -83,8 +83,7 @@ enum class LinkBodyType : uint8_t {
 	None,
 	Text,
 	Json,
-	Binary,
-	Stream
+	Binary
 };
 
 enum class LinkStreamAction : uint8_t {
@@ -175,6 +174,7 @@ class LinkHeaders {
 	size_t size() const;
 	size_t totalSize() const;
 	void clear();
+	LinkResult copyFrom(const LinkHeaders &other);
 
   private:
 	struct Entry {
@@ -193,7 +193,6 @@ class LinkHeaders {
 	bool copyEntry(Entry &entry, const char *name, const char *value);
 	void freeEntry(Entry &entry);
 	void moveFrom(LinkHeaders &other);
-	bool copyFrom(const LinkHeaders &other);
 
 	Entry *_entries = nullptr;
 	size_t _count = 0;
@@ -208,6 +207,10 @@ class LinkHeaders {
 class LinkBody {
   public:
 	LinkBody() = default;
+	LinkBody(const LinkBody &other);
+	LinkBody &operator=(const LinkBody &other);
+	LinkBody(LinkBody &&other) noexcept = default;
+	LinkBody &operator=(LinkBody &&other) noexcept = default;
 
 	static LinkBody none();
 	static LinkBody text(const char *value);
@@ -221,6 +224,7 @@ class LinkBody {
 	LinkErrorCode status() const;
 	bool valid() const;
 	void clear();
+	LinkResult copyFrom(const LinkBody &other);
 
   private:
 	friend struct LinkBodyBuilder;
@@ -399,9 +403,9 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 			}
 		}
 
-		body = request.body;
-		if (body.status() != LinkErrorCode::Ok) {
-			return LinkResult::error(body.status(), "request body is invalid");
+		LinkResult bodyResult = body.copyFrom(request.body);
+		if (!bodyResult) {
+			return bodyResult;
 		}
 
 		id = requestId;
@@ -445,7 +449,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	LinkClient() = default;
 
 	~LinkClient() {
-		deinit();
+		forceDeinitBlocking();
 	}
 
 	LinkClient(const LinkClient &) = delete;
@@ -469,7 +473,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 		Request request;
 		request.method = LinkMethod::Get;
 		request.url = url;
-		request.headers = headers;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "response callback is too large");
 		}
@@ -492,8 +499,14 @@ template <size_t CallbackStorageSize> class LinkClient {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
-		request.headers = headers;
-		request.body = body;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
+		LinkResult bodyResult = request.body.copyFrom(body);
+		if (!bodyResult) {
+			return bodyResult;
+		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "response callback is too large");
 		}
@@ -510,9 +523,15 @@ template <size_t CallbackStorageSize> class LinkClient {
 		Request request;
 		request.method = LinkMethod::Get;
 		request.url = url;
-		request.headers = headers;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
 		request.parseJsonResponse = true;
-		addJsonAccept(request.headers);
+		LinkResult acceptResult = addJsonAccept(request.headers);
+		if (!acceptResult) {
+			return acceptResult;
+		}
 		if (!request.onJsonResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "json callback is too large");
 		}
@@ -545,10 +564,19 @@ template <size_t CallbackStorageSize> class LinkClient {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
-		request.headers = headers;
-		request.body = body;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
+		LinkResult requestBodyResult = request.body.copyFrom(body);
+		if (!requestBodyResult) {
+			return requestBodyResult;
+		}
 		request.parseJsonResponse = true;
-		addJsonAccept(request.headers);
+		LinkResult acceptResult = addJsonAccept(request.headers);
+		if (!acceptResult) {
+			return acceptResult;
+		}
 		if (!request.headers.has("Content-Type")) {
 			LinkResult headerResult = request.headers.set("Content-Type", "application/json");
 			if (!headerResult) {
@@ -589,7 +617,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 		Request request;
 		request.method = LinkMethod::Get;
 		request.url = url;
-		request.headers = headers;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
 		request.responseMode = LinkResponseMode::Stream;
 		if (!request.onStreamStart.assign(std::forward<StartCallback>(onStart)) ||
 		    !request.onStreamChunk.assign(std::forward<ChunkCallback>(onChunk)) ||
@@ -635,7 +666,13 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void processRequest(QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;
 	bool shouldUsePsramStack() const;
-	void addJsonAccept(LinkHeaders &headers) const;
+	LinkResult addJsonAccept(LinkHeaders &headers) const;
+	LinkResult deinitInternal(bool waitForever);
+	void forceDeinitBlocking();
+	void markStopping();
+	void wakeWorkers();
+	LinkResult waitForWorkers(bool waitForever);
+	LinkResult freeRuntimeStorage();
 
 #if defined(ESP32)
 	void performHttpRequest(QueuedRequest &request);
@@ -645,6 +682,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	mutable LinkMutex _mutex;
 	LinkConfig _config{};
+	// When deinit() times out, Stopping means workers may still own slots.
+	// Do not free task-owned storage until all workers become inactive.
 	LinkState _state = LinkState::Uninitialized;
 	QueuedRequest *_slots = nullptr;
 	bool *_slotUsed = nullptr;

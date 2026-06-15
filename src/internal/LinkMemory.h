@@ -104,6 +104,7 @@ class LinkOwnedBuffer {
 		}
 		std::memcpy(_data, data, size);
 		_size = size;
+		_capacity = size;
 		_nulTerminated = false;
 		return true;
 	}
@@ -119,7 +120,28 @@ class LinkOwnedBuffer {
 			return false;
 		}
 		_size = size;
+		_capacity = size + 1;
 		_nulTerminated = true;
+		return true;
+	}
+
+	bool reserve(size_t capacity, bool preferPsram = true) {
+		if (capacity <= _capacity) {
+			return true;
+		}
+		uint8_t *next = static_cast<uint8_t *>(link_memory::allocate(capacity, preferPsram));
+		if (next == nullptr) {
+			return false;
+		}
+		if (_data != nullptr && _size > 0) {
+			std::memcpy(next, _data, _size);
+		}
+		if (_nulTerminated) {
+			next[_size] = '\0';
+		}
+		link_memory::release(_data);
+		_data = next;
+		_capacity = capacity;
 		return true;
 	}
 
@@ -134,19 +156,26 @@ class LinkOwnedBuffer {
 			return false;
 		}
 		const size_t extra = nulTerminate ? 1 : 0;
-		uint8_t *next = static_cast<uint8_t *>(link_memory::allocate(_size + size + extra, preferPsram));
-		if (next == nullptr) {
+		const size_t required = _size + size + extra;
+		if (required < _size || required < size) {
 			return false;
 		}
-		if (_data != nullptr && _size > 0) {
-			std::memcpy(next, _data, _size);
+		size_t nextCapacity = _capacity == 0 ? required : _capacity;
+		while (nextCapacity < required) {
+			const size_t grown = nextCapacity * 2;
+			if (grown <= nextCapacity) {
+				nextCapacity = required;
+				break;
+			}
+			nextCapacity = grown;
 		}
-		std::memcpy(next + _size, data, size);
+		if (!reserve(nextCapacity, preferPsram)) {
+			return false;
+		}
+		std::memcpy(_data + _size, data, size);
 		if (nulTerminate) {
-			next[_size + size] = '\0';
+			_data[_size + size] = '\0';
 		}
-		link_memory::release(_data);
-		_data = next;
 		_size += size;
 		_nulTerminated = nulTerminate;
 		return true;
@@ -156,6 +185,7 @@ class LinkOwnedBuffer {
 		link_memory::release(_data);
 		_data = nullptr;
 		_size = 0;
+		_capacity = 0;
 		_nulTerminated = false;
 	}
 
@@ -183,29 +213,35 @@ class LinkOwnedBuffer {
 		return _size == 0;
 	}
 
-  private:
-	void copyFrom(const LinkOwnedBuffer &other) {
+	bool copyFrom(const LinkOwnedBuffer &other) {
+		if (this == &other) {
+			return true;
+		}
+		clear();
 		if (other._data == nullptr) {
-			return;
+			return true;
 		}
 		if (other._nulTerminated) {
-			assignText(reinterpret_cast<const char *>(other._data), other._size);
-			return;
+			return assignText(reinterpret_cast<const char *>(other._data), other._size);
 		}
-		assign(other._data, other._size);
+		return assign(other._data, other._size);
 	}
 
+  private:
 	void moveFrom(LinkOwnedBuffer &other) {
 		_data = other._data;
 		_size = other._size;
+		_capacity = other._capacity;
 		_nulTerminated = other._nulTerminated;
 		other._data = nullptr;
 		other._size = 0;
+		other._capacity = 0;
 		other._nulTerminated = false;
 	}
 
 	uint8_t *_data = nullptr;
 	size_t _size = 0;
+	size_t _capacity = 0;
 	bool _nulTerminated = false;
 	inline static uint8_t _empty[1] = {0};
 };

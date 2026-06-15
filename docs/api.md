@@ -23,7 +23,7 @@ LinkClient<96> link;
 
 ## Core Types
 
-`LinkConfig` controls worker tasks, queue size, timeouts, redirects, and memory limits.
+`LinkConfig` controls worker tasks, in-flight request capacity, timeouts, redirects, and memory limits.
 
 `LinkResult` is returned by setup and submission calls. A false result means the request was not accepted or the lifecycle operation failed.
 
@@ -67,7 +67,7 @@ client.getStream(url, onStart, onChunk, onEnd);
 
 ## Headers And Bodies
 
-`LinkHeaders` supports `add`, `set`, `has`, `get`, `size`, and `clear`. Header lookup is case-insensitive.
+`LinkHeaders` supports `add`, `set`, `has`, `get`, `size`, `clear`, and `copyFrom`. Header lookup is case-insensitive.
 
 `LinkBody` supports:
 
@@ -78,4 +78,8 @@ LinkBody::json(jsonDocument);
 LinkBody::bytes(data, size);
 ```
 
+`LinkBody` also supports `copyFrom` for explicit failure-aware copies.
+
 Queued requests own copied URL, header, body, and callback data.
+
+When `followRedirects` is enabled, automatic redirects are limited to GET requests in buffered mode with absolute `http://` or `https://` `Location` headers.

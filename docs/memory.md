@@ -14,9 +14,11 @@ config.maxTotalHeaderSize = 4096;
 config.streamChunkSize = 1024;
 ```
 
+`queueSize` is the maximum number of accepted in-flight requests, including both queued and actively running requests. Active requests occupy their queue slot until completion, so `queueSize` must be at least `maxConcurrentRequests`.
+
 Queued requests copy URL, headers, body, timeout, mode, and callbacks into owned storage before entering the worker queue.
 
-Internal allocations prefer PSRAM when available and fall back to internal RAM.
+Payload buffers prefer PSRAM when available and fall back to internal RAM. Worker stacks can optionally use PSRAM through `LinkStackType`; queue arrays, worker records, and header entry arrays use normal allocation.
 
 Callback storage is compile-time fixed:
 

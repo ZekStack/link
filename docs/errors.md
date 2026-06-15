@@ -13,16 +13,22 @@ Common submission errors:
 | `UrlTooLarge` | URL exceeds `maxUrlSize`. |
 | `RequestTooLarge` | Request body exceeds `maxRequestBodySize`. |
 | `CallbackTooLarge` | Callback does not fit inline storage. |
+| `InvalidConfig` | Configuration is internally inconsistent, such as `queueSize < maxConcurrentRequests`. |
 
 Common response errors:
 
 | Code | Meaning |
 | --- | --- |
 | `Timeout` | HTTP operation timed out. |
+| `ConnectionFailed` | ESP reported a connection or socket failure before a valid response. |
 | `TlsFailed` | Verified HTTPS could not be established. |
+| `SendFailed` | ESP reported request write failure. |
+| `ReceiveFailed` | ESP reported response read, header fetch, closed connection, incomplete data, or another unmapped transport failure. |
 | `ResponseTooLarge` | Buffered response exceeded `maxResponseBodySize`. |
 | `HeaderTooLarge` | Response headers exceeded configured limits. |
 | `JsonParseFailed` | JSON parsing failed or exceeded JSON limits. |
 | `Cancelled` | Request was cancelled during shutdown or by stream callback. |
+
+Transport diagnostics are best-effort and depend on the ESP-IDF error, socket errno, and TLS details exposed by `esp_http_client`.
 
 HTTP status codes are not Link errors. A valid `404` response is still a successful transport response.

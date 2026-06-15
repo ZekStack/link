@@ -24,6 +24,11 @@ void testHeaders() {
 	assert(headers.add("X-Test", "1"));
 	assert(headers.add("Extra", "2").code == LinkErrorCode::TooManyHeaders);
 	assert(headers.add("Long-Header-Name", "2").code == LinkErrorCode::HeaderTooLarge);
+
+	LinkHeaders copy;
+	assert(copy.copyFrom(headers));
+	assert(copy.size() == headers.size());
+	assert(std::strcmp(copy.get("accept"), "text/plain") == 0);
 }
 
 void testBody() {
@@ -37,6 +42,23 @@ void testBody() {
 	assert(bytes.valid());
 	assert(bytes.size() == 3);
 	assert(bytes.data()[1] == 2);
+
+	LinkBody copy;
+	assert(copy.copyFrom(text));
+	assert(copy.valid());
+	assert(copy.size() == 5);
+	assert(std::strcmp(copy.c_str(), "hello") == 0);
+}
+
+void testOwnedBufferAppend() {
+	LinkOwnedBuffer buffer;
+	const uint8_t first[] = {'h', 'e'};
+	const uint8_t second[] = {'l', 'l', 'o'};
+	assert(buffer.append(first, sizeof(first), true));
+	assert(std::strcmp(buffer.c_str(), "he") == 0);
+	assert(buffer.append(second, sizeof(second), true));
+	assert(buffer.size() == 5);
+	assert(std::strcmp(buffer.c_str(), "hello") == 0);
 }
 
 void freeFunctionResponse(const LinkResponse &) {
@@ -93,6 +115,16 @@ void testLifecycleAndQueueLimits() {
 	assert(!link.isInitialized());
 }
 
+void testInvalidQueueConcurrencyConfig() {
+	Link link;
+	LinkConfig config;
+	config.queueSize = 1;
+	config.maxConcurrentRequests = 2;
+	LinkResult result = link.init(config);
+	assert(result.code == LinkErrorCode::InvalidConfig);
+	assert(!link.isInitialized());
+}
+
 void testRequestValidation() {
 	Link link;
 	LinkConfig config;
@@ -111,8 +143,10 @@ int main() {
 	testResultAndStateStrings();
 	testHeaders();
 	testBody();
+	testOwnedBufferAppend();
 	testCallbacks();
 	testLifecycleAndQueueLimits();
+	testInvalidQueueConcurrencyConfig();
 	testRequestValidation();
 	return 0;
 }

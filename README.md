@@ -14,7 +14,7 @@ Link helps you communicate with APIs and backend services in Arduino ESP32 proje
 * **Concurrent workers** - run more than one HTTP request at the same time with a bounded worker pool.
 * **ESP32-friendly memory** - request bodies, response bodies, URLs, headers, JSON, callbacks, and stream buffers have explicit limits.
 * **Clear API** - operations return `LinkResult`; HTTP status codes stay separate from transport failures.
-* **Production-minded** - no exceptions, FreeRTOS mutex protection, bindable callbacks, and PSRAM-preferred allocation.
+* **Production-minded** - no exceptions, FreeRTOS mutex protection, bindable callbacks, and PSRAM-preferred payload buffers.
 
 ## Install
 
@@ -97,7 +97,9 @@ void loop() {
 * User callbacks are not called while Link internal mutexes are held.
 * `LinkJsonResponse::json` is valid only during the callback unless the user copies the needed data.
 * HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
-* `deinit()` cancels queued requests and waits for active worker requests to exit. If a request is blocked inside the HTTP client, timeout settings define the maximum wait.
+* `deinit()` cancels queued requests and waits for active worker requests to exit. If the public wait times out, Link stays in `Stopping` and keeps worker-owned storage alive so a later `deinit()` can finish cleanup.
+* The destructor performs blocking shutdown. It assumes active HTTP operations eventually return through their configured nonzero request timeout.
+* Redirect following is limited to GET requests in buffered mode with absolute `http://` or `https://` `Location` headers.
 
 ## Examples
 
@@ -158,7 +160,7 @@ For the full API, see [`docs/api.md`](docs/api.md).
 | Language | C++20 |
 | Networking | ESP-IDF `esp_http_client` |
 | HTTPS | ESP-IDF certificate bundle when available |
-| PSRAM | Preferred for internal allocations and optional worker stacks |
+| PSRAM | Payload buffers prefer PSRAM; worker stacks can optionally use PSRAM |
 | Dependencies | `bblanchon/ArduinoJson >= 7.0.0` |
 | Exceptions | Not used |
 | Status | Early-stage `0.0.1` |
@@ -177,6 +179,8 @@ config.maxJsonDocumentSize = 8192;
 config.maxTotalHeaderSize = 4096;
 config.streamChunkSize = 1024;
 ```
+
+`queueSize` is the maximum number of accepted in-flight requests, including queued and actively running requests. It must be at least `maxConcurrentRequests`.
 
 For all options, see [`docs/memory.md`](docs/memory.md).
 

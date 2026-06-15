@@ -1,6 +1,7 @@
 #pragma once
 
 #if defined(ESP32)
+#include <errno.h>
 #include <esp_err.h>
 #include <esp_http_client.h>
 #if __has_include(<esp_crt_bundle.h>)
@@ -15,6 +16,12 @@ template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &config) const {
 	if (config.queueSize == 0 || config.maxConcurrentRequests == 0) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "queue and concurrency must be nonzero");
+	}
+	if (config.queueSize < config.maxConcurrentRequests) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "queue size must be at least max concurrent requests"
+		);
 	}
 	if (!link_task_support::isValidStackSize(config.stackSizeBytes)) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "worker stack size is invalid");
@@ -124,7 +131,7 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			for (size_t n = 0; n < config.maxConcurrentRequests; ++n) {
 				xSemaphoreGive(_items);
 			}
-			deinit();
+			forceDeinitBlocking();
 			return LinkResult::error(LinkErrorCode::AllocationFailed, "worker task creation failed");
 		}
 		_workers[i].active = true;
@@ -134,7 +141,7 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 	{
 		LinkLock lock(_mutex);
 		if (!lock) {
-			deinit();
+			forceDeinitBlocking();
 			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 		}
 		_state = LinkState::Running;
@@ -143,6 +150,68 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 }
 
 template <size_t CallbackStorageSize> LinkResult LinkClient<CallbackStorageSize>::deinit() {
+	return deinitInternal(false);
+}
+
+template <size_t CallbackStorageSize>
+void LinkClient<CallbackStorageSize>::forceDeinitBlocking() {
+	(void)deinitInternal(true);
+}
+
+template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::markStopping() {
+	LinkLock lock(_mutex);
+	if (lock && _state != LinkState::Uninitialized) {
+		_state = LinkState::Stopping;
+	}
+}
+
+template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::wakeWorkers() {
+#if defined(ESP32)
+	if (_items != nullptr) {
+		for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
+			xSemaphoreGive(_items);
+		}
+	}
+#endif
+}
+
+template <size_t CallbackStorageSize>
+LinkResult LinkClient<CallbackStorageSize>::waitForWorkers(bool waitForever) {
+#if defined(ESP32)
+	uint32_t timeoutMs = _config.defaultTimeoutMs + 100;
+	if (timeoutMs < _config.defaultTimeoutMs) {
+		timeoutMs = UINT32_MAX;
+	}
+	const uint32_t started = millis();
+	while (true) {
+		bool workersRunning = false;
+		{
+			LinkLock lock(_mutex);
+			if (!lock) {
+				return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+			}
+			if (_workers != nullptr) {
+				for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
+					workersRunning = workersRunning || _workers[i].active;
+				}
+			}
+		}
+		if (!workersRunning) {
+			return LinkResult::ok();
+		}
+		if (!waitForever && static_cast<uint32_t>(millis() - started) >= timeoutMs) {
+			return LinkResult::error(LinkErrorCode::Timeout, "timed out waiting for link workers");
+		}
+		link_task_support::delayMs(10);
+	}
+#else
+	(void)waitForever;
+	return LinkResult::ok();
+#endif
+}
+
+template <size_t CallbackStorageSize>
+LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
 	{
 		LinkLock lock(_mutex);
 		if (!lock) {
@@ -151,47 +220,12 @@ template <size_t CallbackStorageSize> LinkResult LinkClient<CallbackStorageSize>
 		if (_state == LinkState::Uninitialized) {
 			return LinkResult::ok();
 		}
-		_state = LinkState::Stopping;
-	}
-
-	cancelPendingRequests();
-
 #if defined(ESP32)
-	if (_items != nullptr) {
-		for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
-			xSemaphoreGive(_items);
+		if (_items != nullptr) {
+			vSemaphoreDelete(_items);
+			_items = nullptr;
 		}
-	}
-	bool workersRunning = true;
-	const uint32_t waitUntil = millis() + _config.defaultTimeoutMs + 100;
-	while (workersRunning && millis() < waitUntil) {
-		workersRunning = false;
-		{
-			LinkLock lock(_mutex);
-			if (lock && _workers != nullptr) {
-				for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
-					workersRunning = workersRunning || _workers[i].active;
-				}
-			}
-		}
-		if (workersRunning) {
-			link_task_support::delayMs(10);
-		}
-	}
-	if (workersRunning) {
-		return LinkResult::error(LinkErrorCode::Timeout, "timed out waiting for link workers");
-	}
-	if (_items != nullptr) {
-		vSemaphoreDelete(_items);
-		_items = nullptr;
-	}
 #endif
-
-	{
-		LinkLock lock(_mutex);
-		if (!lock) {
-			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-		}
 		delete[] _slots;
 		delete[] _slotUsed;
 		delete[] _queue;
@@ -207,6 +241,30 @@ template <size_t CallbackStorageSize> LinkResult LinkClient<CallbackStorageSize>
 		_state = LinkState::Uninitialized;
 	}
 	return LinkResult::ok();
+}
+
+template <size_t CallbackStorageSize>
+LinkResult LinkClient<CallbackStorageSize>::deinitInternal(bool waitForever) {
+	{
+		LinkLock lock(_mutex);
+		if (!lock) {
+			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+		}
+		if (_state == LinkState::Uninitialized) {
+			return LinkResult::ok();
+		}
+	}
+
+	markStopping();
+	cancelPendingRequests();
+	wakeWorkers();
+
+	LinkResult waitResult = waitForWorkers(waitForever);
+	if (!waitResult) {
+		return waitResult;
+	}
+
+	return freeRuntimeStorage();
 }
 
 template <size_t CallbackStorageSize>
@@ -408,10 +466,11 @@ void LinkClient<CallbackStorageSize>::processRequest(QueuedRequest &request) {
 }
 
 template <size_t CallbackStorageSize>
-void LinkClient<CallbackStorageSize>::addJsonAccept(LinkHeaders &headers) const {
+LinkResult LinkClient<CallbackStorageSize>::addJsonAccept(LinkHeaders &headers) const {
 	if (!headers.has("Accept")) {
-		headers.set("Accept", "application/json");
+		return headers.set("Accept", "application/json");
 	}
+	return LinkResult::ok();
 }
 
 #if !defined(ESP32)
@@ -464,20 +523,69 @@ inline esp_http_client_method_t toEspMethod(LinkMethod method) {
 	return HTTP_METHOD_GET;
 }
 
-inline LinkError mapEspError(esp_err_t err) {
+inline bool isHttps(const char *url) {
+	return url != nullptr && std::strncmp(url, "https://", 8) == 0;
+}
+
+inline LinkError mapEspError(esp_err_t err, esp_http_client_handle_t client, const char *url) {
 	if (err == ESP_OK) {
 		return {LinkErrorCode::Ok, "ok"};
+	}
+	if (client != nullptr && isHttps(url)) {
+		int tlsError = 0;
+		int tlsFlags = 0;
+		const esp_err_t tlsResult =
+		    esp_http_client_get_and_clear_last_tls_error(client, &tlsError, &tlsFlags);
+		if (tlsResult != ESP_OK || tlsError != 0 || tlsFlags != 0) {
+			return {LinkErrorCode::TlsFailed, "https request failed"};
+		}
 	}
 #if defined(ESP_ERR_TIMEOUT)
 	if (err == ESP_ERR_TIMEOUT) {
 		return {LinkErrorCode::Timeout, "http request timed out"};
 	}
 #endif
+#if defined(ESP_ERR_HTTP_READ_TIMEOUT)
+	if (err == ESP_ERR_HTTP_READ_TIMEOUT || err == ESP_ERR_HTTP_EAGAIN ||
+	    err == ESP_ERR_HTTP_CONNECTING) {
+		return {LinkErrorCode::Timeout, "http request timed out"};
+	}
+#endif
+#if defined(ESP_ERR_HTTP_CONNECT)
+	if (err == ESP_ERR_HTTP_CONNECT) {
+		return {LinkErrorCode::ConnectionFailed, "http connection failed"};
+	}
+#endif
+#if defined(ESP_ERR_HTTP_WRITE_DATA)
+	if (err == ESP_ERR_HTTP_WRITE_DATA) {
+		return {LinkErrorCode::SendFailed, "http send failed"};
+	}
+#endif
+#if defined(ESP_ERR_HTTP_FETCH_HEADER)
+	if (err == ESP_ERR_HTTP_FETCH_HEADER || err == ESP_ERR_HTTP_CONNECTION_CLOSED ||
+	    err == ESP_ERR_HTTP_INCOMPLETE_DATA) {
+		return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
+	}
+#endif
+	if (client != nullptr) {
+		const int socketError = esp_http_client_get_errno(client);
+		if (socketError != 0 && socketError != -1) {
+			if (socketError == ETIMEDOUT) {
+				return {LinkErrorCode::Timeout, "http request timed out"};
+			}
+			if (socketError == ECONNREFUSED || socketError == ENETUNREACH ||
+			    socketError == EHOSTUNREACH || socketError == ENOTCONN) {
+				return {LinkErrorCode::ConnectionFailed, "http connection failed"};
+			}
+			if (socketError == EPIPE) {
+				return {LinkErrorCode::SendFailed, "http send failed"};
+			}
+			if (socketError == ECONNRESET) {
+				return {LinkErrorCode::ReceiveFailed, "http receive failed"};
+			}
+		}
+	}
 	return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
-}
-
-inline bool isHttps(const char *url) {
-	return url != nullptr && std::strncmp(url, "https://", 8) == 0;
 }
 
 inline bool isRedirectStatus(int status) {
@@ -499,10 +607,11 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 	switch (event->event_id) {
 	case HTTP_EVENT_ON_HEADER:
 		if (event->header_key != nullptr && event->header_value != nullptr) {
-			LinkResult result = context->response->headers.add(event->header_key, event->header_value);
-			LinkResult streamResult =
-			    context->streamInfo.headers.add(event->header_key, event->header_value);
-			if (!result || !streamResult) {
+			LinkResult result =
+			    context->request->responseMode == LinkResponseMode::Stream
+			        ? context->streamInfo.headers.add(event->header_key, event->header_value)
+			        : context->response->headers.add(event->header_key, event->header_value);
+			if (!result) {
 				context->headerFailed = true;
 				return ESP_FAIL;
 			}
@@ -536,14 +645,16 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			break;
 		}
 
-		if (context->response->body.size() + static_cast<size_t>(event->data_len) >
-		    context->owner->_config.maxResponseBodySize) {
+		const size_t chunkSize = static_cast<size_t>(event->data_len);
+		const size_t currentSize = context->response->body.size();
+		if (chunkSize > context->owner->_config.maxResponseBodySize ||
+		    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
 			context->responseTooLarge = true;
 			return ESP_FAIL;
 		}
 		if (!context->response->body.append(
 		        static_cast<const uint8_t *>(event->data),
-		        static_cast<size_t>(event->data_len),
+		        chunkSize,
 		        true
 		    )) {
 			context->response->error = {LinkErrorCode::AllocationFailed, "response body allocation failed"};
@@ -648,6 +759,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 		response.httpStatus = esp_http_client_get_status_code(client);
 		context.streamInfo.httpStatus = response.httpStatus;
 		context.streamInfo.contentLength = esp_http_client_get_content_length(client);
+		LinkError transportError = link_internal_http::mapEspError(err, client, currentUrl);
 		esp_http_client_cleanup(client);
 
 		if (context.headerFailed) {
@@ -657,11 +769,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 		} else if (context.cancelled) {
 			response.error = {LinkErrorCode::Cancelled, "request cancelled"};
 		} else {
-			response.error = link_internal_http::mapEspError(err);
-			if (response.error.code == LinkErrorCode::ReceiveFailed &&
-			    link_internal_http::isHttps(currentUrl)) {
-				response.error = {LinkErrorCode::TlsFailed, "https request failed"};
-			}
+			response.error = transportError;
 		}
 
 		if (response.error.code == LinkErrorCode::Ok && request.method == LinkMethod::Get &&
@@ -711,7 +819,10 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 			LinkJsonResponse jsonResponse;
 			jsonResponse.error = response.error;
 			jsonResponse.httpStatus = response.httpStatus;
-			jsonResponse.headers = response.headers;
+			LinkResult headerCopyResult = jsonResponse.headers.copyFrom(response.headers);
+			if (!headerCopyResult) {
+				jsonResponse.error = {headerCopyResult.code, headerCopyResult.message};
+			}
 			if (jsonResponse.error.code == LinkErrorCode::Ok) {
 				if (response.body.size() > _config.maxJsonDocumentSize) {
 					jsonResponse.error = {

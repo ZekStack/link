@@ -327,7 +327,14 @@ void LinkHeaders::moveFrom(LinkHeaders &other) {
 	other._totalSize = 0;
 }
 
-bool LinkHeaders::copyFrom(const LinkHeaders &other) {
+LinkResult LinkHeaders::copyFrom(const LinkHeaders &other) {
+	if (this == &other) {
+		return LinkResult::ok();
+	}
+	clear();
+	delete[] _entries;
+	_entries = nullptr;
+	_capacity = 0;
 	configureLimits(
 	    other._maxHeaderCount,
 	    other._maxHeaderNameSize,
@@ -335,18 +342,37 @@ bool LinkHeaders::copyFrom(const LinkHeaders &other) {
 	    other._maxTotalHeaderSize
 	);
 	if (other._count == 0) {
-		return true;
+		return LinkResult::ok();
 	}
-	if (!ensureStorage()) {
-		return false;
+	LinkResult storageResult = ensureStorage();
+	if (!storageResult) {
+		return storageResult;
 	}
 	for (size_t i = 0; i < other._count; ++i) {
-		if (!add(other._entries[i].name, other._entries[i].value)) {
+		LinkResult addResult = add(other._entries[i].name, other._entries[i].value);
+		if (!addResult) {
 			clear();
-			return false;
+			return addResult;
 		}
 	}
-	return true;
+	return LinkResult::ok();
+}
+
+LinkBody::LinkBody(const LinkBody &other) {
+	LinkResult result = copyFrom(other);
+	if (!result) {
+		_status = result.code;
+	}
+}
+
+LinkBody &LinkBody::operator=(const LinkBody &other) {
+	if (this != &other) {
+		LinkResult result = copyFrom(other);
+		if (!result) {
+			_status = result.code;
+		}
+	}
+	return *this;
 }
 
 LinkBody LinkBody::none() {
@@ -409,6 +435,24 @@ void LinkBody::clear() {
 	_type = LinkBodyType::None;
 	_buffer.clear();
 	_status = LinkErrorCode::Ok;
+}
+
+LinkResult LinkBody::copyFrom(const LinkBody &other) {
+	if (this == &other) {
+		return LinkResult::ok();
+	}
+	clear();
+	_type = other._type;
+	_status = other._status;
+	if (other._status != LinkErrorCode::Ok) {
+		return LinkResult::error(other._status, "request body is invalid");
+	}
+	if (!_buffer.copyFrom(other._buffer)) {
+		_type = LinkBodyType::None;
+		_status = LinkErrorCode::AllocationFailed;
+		return LinkResult::error(LinkErrorCode::AllocationFailed, "body allocation failed");
+	}
+	return LinkResult::ok();
 }
 
 namespace link_internal {
