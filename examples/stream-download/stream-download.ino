@@ -2,7 +2,7 @@
 #include <Link.h>
 #include <WiFi.h>
 
-Link link;
+Link client;
 
 void waitForWiFi() {
 	while (WiFi.status() != WL_CONNECTED) {
@@ -19,11 +19,11 @@ void setup() {
 	LinkConfig config;
 	config.streamChunkSize = 2048;
 
-	if (!link.init(config)) {
+	if (!client.init(config)) {
 		return;
 	}
 
-	link.getStream(
+	client.getStream(
 	    "https://example.com/firmware.bin",
 	    [](const LinkStreamInfo &info) {
 		    Serial.println(info.httpStatus);

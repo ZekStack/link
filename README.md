@@ -54,7 +54,7 @@ Arduino/libraries/Link
 #include <Arduino.h>
 #include <Link.h>
 
-Link link;
+Link client;
 
 void onResponse(const LinkResponse &response) {
     if (!response) {
@@ -73,13 +73,13 @@ void setup() {
     config.maxConcurrentRequests = 2;
     config.maxResponseBodySize = 8192;
 
-    LinkResult initResult = link.init(config);
+    LinkResult initResult = client.init(config);
     if (!initResult) {
         Serial.println(initResult.message);
         return;
     }
 
-    link.get("https://example.com", onResponse);
+    client.get("https://example.com", onResponse);
 }
 
 void loop() {
@@ -134,17 +134,17 @@ Detailed documentation is available in the `docs/` folder.
 ## API overview
 
 ```cpp
-Link link;
+Link client;
 
 LinkResult init(const LinkConfig &config);
 LinkResult deinit();
 LinkResult fetch(const LinkRequest &request);
 
-link.get(url, callback);
-link.post(url, body, callback);
-link.getJson(url, callback);
-link.postJson(url, json, callback);
-link.getStream(url, onStart, onChunk, onEnd);
+client.get(url, callback);
+client.post(url, body, callback);
+client.getJson(url, callback);
+client.postJson(url, json, callback);
+client.getStream(url, onStart, onChunk, onEnd);
 ```
 
 For the full API, see [`docs/api.md`](docs/api.md).
@@ -183,7 +183,7 @@ For all options, see [`docs/memory.md`](docs/memory.md).
 ## Error handling
 
 ```cpp
-LinkResult result = link.get(url, callback);
+LinkResult result = client.get(url, callback);
 
 if (!result) {
     Serial.println(result.message);

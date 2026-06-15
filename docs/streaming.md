@@ -3,7 +3,7 @@
 `getStream()` downloads response data without buffering the full body.
 
 ```cpp
-link.getStream(
+client.getStream(
     url,
     onStart,
     onChunk,

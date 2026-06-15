@@ -21,7 +21,7 @@ Internal allocations prefer PSRAM when available and fall back to internal RAM.
 Callback storage is compile-time fixed:
 
 ```cpp
-Link link;          // 64-byte callback storage
+Link client;        // 64-byte callback storage
 LinkClient<96> big; // 96-byte callback storage
 ```
 

@@ -2,7 +2,7 @@
 #include <Link.h>
 #include <WiFi.h>
 
-Link link;
+Link client;
 
 void waitForWiFi() {
 	while (WiFi.status() != WL_CONNECTED) {
@@ -16,7 +16,7 @@ void setup() {
 	WiFi.begin("ssid", "password");
 	waitForWiFi();
 
-	if (!link.init()) {
+	if (!client.init()) {
 		return;
 	}
 
@@ -24,7 +24,7 @@ void setup() {
 	headers.set("Authorization", "Bearer token");
 	headers.set("Accept", "application/json");
 
-	link.get("https://example.com/api/status", headers, [](const LinkResponse &response) {
+	client.get("https://example.com/api/status", headers, [](const LinkResponse &response) {
 		if (!response) {
 			Serial.println(response.error.message);
 			return;

@@ -3,7 +3,7 @@
 #include <Link.h>
 #include <WiFi.h>
 
-Link link;
+Link client;
 
 void waitForWiFi() {
 	while (WiFi.status() != WL_CONNECTED) {
@@ -17,7 +17,7 @@ void setup() {
 	WiFi.begin("ssid", "password");
 	waitForWiFi();
 
-	if (!link.init()) {
+	if (!client.init()) {
 		return;
 	}
 
@@ -25,7 +25,7 @@ void setup() {
 	payload["device"] = "esp32";
 	payload["online"] = true;
 
-	link.postJson("https://example.com/api/devices", payload, [](const LinkJsonResponse &response) {
+	client.postJson("https://example.com/api/devices", payload, [](const LinkJsonResponse &response) {
 		if (!response) {
 			Serial.println(response.error.message);
 			return;

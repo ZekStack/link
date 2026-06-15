@@ -8,11 +8,11 @@ class ApiClient {
 		LinkConfig config;
 		config.maxConcurrentRequests = 2;
 
-		if (!link.init(config)) {
+		if (!client.init(config)) {
 			return;
 		}
 
-		link.get(
+		client.get(
 		    "https://example.com/status",
 		    Link::ResponseCallback::bind(this, &ApiClient::onStatus)
 		);
@@ -29,7 +29,7 @@ class ApiClient {
 		Serial.println(response.body.c_str());
 	}
 
-	Link link;
+	Link client;
 };
 
 ApiClient api;

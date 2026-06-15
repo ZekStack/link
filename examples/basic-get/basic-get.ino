@@ -2,7 +2,7 @@
 #include <Link.h>
 #include <WiFi.h>
 
-Link link;
+Link client;
 
 void waitForWiFi() {
 	while (WiFi.status() != WL_CONNECTED) {
@@ -29,13 +29,13 @@ void setup() {
 	LinkConfig config;
 	config.maxConcurrentRequests = 2;
 
-	LinkResult initResult = link.init(config);
+	LinkResult initResult = client.init(config);
 	if (!initResult) {
 		Serial.println(initResult.message);
 		return;
 	}
 
-	LinkResult result = link.get("https://example.com", onResponse);
+	LinkResult result = client.get("https://example.com", onResponse);
 	if (!result) {
 		Serial.println(result.message);
 	}

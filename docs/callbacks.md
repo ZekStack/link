@@ -12,13 +12,13 @@ Function pointer:
 void onResponse(const LinkResponse &response) {
 }
 
-link.get(url, onResponse);
+client.get(url, onResponse);
 ```
 
 Capturing lambda:
 
 ```cpp
-link.get(url, [this](const LinkResponse &response) {
+client.get(url, [this](const LinkResponse &response) {
     handleResponse(response);
 });
 ```
@@ -26,7 +26,7 @@ link.get(url, [this](const LinkResponse &response) {
 Bindable class method:
 
 ```cpp
-link.get(
+client.get(
     url,
     Link::ResponseCallback::bind(this, &ApiClient::onResponse)
 );
