@@ -4,6 +4,9 @@
 #include <errno.h>
 #include <esp_err.h>
 #include <esp_http_client.h>
+#if __has_include(<esp_idf_version.h>)
+#include <esp_idf_version.h>
+#endif
 #if __has_include(<esp_crt_bundle.h>)
 #include <esp_crt_bundle.h>
 #define LINK_HAS_CRT_BUNDLE 1
@@ -45,6 +48,22 @@ bool LinkClient<CallbackStorageSize>::shouldUsePsramStack() const {
 		return true;
 	}
 	return _config.stackType == LinkStackType::Auto && link_task_support::hasExternalStackSupport();
+}
+
+template <size_t CallbackStorageSize>
+LinkResult LinkClient<CallbackStorageSize>::getConfigSnapshot(LinkConfig &out) const {
+	LinkLock lock(const_cast<LinkMutex &>(_mutex));
+	if (!lock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+	}
+	if (_state == LinkState::Stopping) {
+		return LinkResult::error(LinkErrorCode::Stopping, "link is stopping");
+	}
+	if (_state != LinkState::Running) {
+		return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
+	}
+	out = _config;
+	return LinkResult::ok();
 }
 
 template <size_t CallbackStorageSize>
@@ -443,12 +462,15 @@ void LinkClient<CallbackStorageSize>::workerLoop(WorkerRecord *worker) {
 		releaseSlot(slotIndex);
 	}
 	if (worker != nullptr) {
-		LinkLock lock(_mutex);
-		if (lock) {
-			worker->active = false;
-			worker->handle = nullptr;
+		const bool createdWithCaps = worker->createdWithCaps;
+		{
+			LinkLock lock(_mutex);
+			if (lock) {
+				worker->active = false;
+				worker->handle = nullptr;
+			}
 		}
-		link_task_support::deleteCurrentTask(worker->createdWithCaps);
+		link_task_support::deleteCurrentTask(createdWithCaps);
 	}
 #else
 	(void)worker;
@@ -527,18 +549,44 @@ inline bool isHttps(const char *url) {
 	return url != nullptr && std::strncmp(url, "https://", 8) == 0;
 }
 
+inline bool getSocketError(esp_http_client_handle_t client, int &socketError) {
+#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) && \
+    ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+	if (client == nullptr) {
+		return false;
+	}
+	socketError = esp_http_client_get_errno(client);
+	return socketError != 0 && socketError != -1;
+#else
+	(void)client;
+	(void)socketError;
+	return false;
+#endif
+}
+
+inline bool hasTlsError(esp_http_client_handle_t client) {
+#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) && \
+    ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+	if (client == nullptr) {
+		return false;
+	}
+	int tlsError = 0;
+	int tlsFlags = 0;
+	const esp_err_t tlsResult =
+	    esp_http_client_get_and_clear_last_tls_error(client, &tlsError, &tlsFlags);
+	return tlsResult != ESP_OK || tlsError != 0 || tlsFlags != 0;
+#else
+	(void)client;
+	return false;
+#endif
+}
+
 inline LinkError mapEspError(esp_err_t err, esp_http_client_handle_t client, const char *url) {
 	if (err == ESP_OK) {
 		return {LinkErrorCode::Ok, "ok"};
 	}
-	if (client != nullptr && isHttps(url)) {
-		int tlsError = 0;
-		int tlsFlags = 0;
-		const esp_err_t tlsResult =
-		    esp_http_client_get_and_clear_last_tls_error(client, &tlsError, &tlsFlags);
-		if (tlsResult != ESP_OK || tlsError != 0 || tlsFlags != 0) {
-			return {LinkErrorCode::TlsFailed, "https request failed"};
-		}
+	if (isHttps(url) && hasTlsError(client)) {
+		return {LinkErrorCode::TlsFailed, "https request failed"};
 	}
 #if defined(ESP_ERR_TIMEOUT)
 	if (err == ESP_ERR_TIMEOUT) {
@@ -567,22 +615,20 @@ inline LinkError mapEspError(esp_err_t err, esp_http_client_handle_t client, con
 		return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
 	}
 #endif
-	if (client != nullptr) {
-		const int socketError = esp_http_client_get_errno(client);
-		if (socketError != 0 && socketError != -1) {
-			if (socketError == ETIMEDOUT) {
-				return {LinkErrorCode::Timeout, "http request timed out"};
-			}
-			if (socketError == ECONNREFUSED || socketError == ENETUNREACH ||
-			    socketError == EHOSTUNREACH || socketError == ENOTCONN) {
-				return {LinkErrorCode::ConnectionFailed, "http connection failed"};
-			}
-			if (socketError == EPIPE) {
-				return {LinkErrorCode::SendFailed, "http send failed"};
-			}
-			if (socketError == ECONNRESET) {
-				return {LinkErrorCode::ReceiveFailed, "http receive failed"};
-			}
+	int socketError = 0;
+	if (getSocketError(client, socketError)) {
+		if (socketError == ETIMEDOUT) {
+			return {LinkErrorCode::Timeout, "http request timed out"};
+		}
+		if (socketError == ECONNREFUSED || socketError == ENETUNREACH ||
+		    socketError == EHOSTUNREACH || socketError == ENOTCONN) {
+			return {LinkErrorCode::ConnectionFailed, "http connection failed"};
+		}
+		if (socketError == EPIPE) {
+			return {LinkErrorCode::SendFailed, "http send failed"};
+		}
+		if (socketError == ECONNRESET) {
+			return {LinkErrorCode::ReceiveFailed, "http receive failed"};
 		}
 	}
 	return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
@@ -645,20 +691,25 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			break;
 		}
 
-		const size_t chunkSize = static_cast<size_t>(event->data_len);
-		const size_t currentSize = context->response->body.size();
-		if (chunkSize > context->owner->_config.maxResponseBodySize ||
-		    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
-			context->responseTooLarge = true;
-			return ESP_FAIL;
-		}
-		if (!context->response->body.append(
-		        static_cast<const uint8_t *>(event->data),
-		        chunkSize,
-		        true
-		    )) {
-			context->response->error = {LinkErrorCode::AllocationFailed, "response body allocation failed"};
-			return ESP_FAIL;
+		{
+			const size_t chunkSize = static_cast<size_t>(event->data_len);
+			const size_t currentSize = context->response->body.size();
+			if (chunkSize > context->owner->_config.maxResponseBodySize ||
+			    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
+				context->responseTooLarge = true;
+				return ESP_FAIL;
+			}
+			if (!context->response->body.append(
+			        static_cast<const uint8_t *>(event->data),
+			        chunkSize,
+			        true
+			    )) {
+				context->response->error = {
+				    LinkErrorCode::AllocationFailed,
+				    "response body allocation failed"
+				};
+				return ESP_FAIL;
+			}
 		}
 		break;
 	default:

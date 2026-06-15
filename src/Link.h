@@ -395,6 +395,7 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		    config.maxHeaderValueSize,
 		    config.maxTotalHeaderSize
 		);
+		// Copy manually so queued headers are revalidated against the active LinkConfig limits.
 		for (size_t i = 0; i < request.headers.size(); ++i) {
 			LinkResult headerResult =
 			    headers.add(request.headers.nameAt(i), request.headers.valueAt(i));
@@ -552,9 +553,14 @@ template <size_t CallbackStorageSize> class LinkClient {
 	    Callback &&callback
 	) {
 		LinkBody body;
-		size_t maxJsonBody = _config.maxRequestBodySize;
-		if (_config.maxJsonDocumentSize < maxJsonBody) {
-			maxJsonBody = _config.maxJsonDocumentSize;
+		LinkConfig configSnapshot;
+		LinkResult configResult = getConfigSnapshot(configSnapshot);
+		if (!configResult) {
+			return configResult;
+		}
+		size_t maxJsonBody = configSnapshot.maxRequestBodySize;
+		if (configSnapshot.maxJsonDocumentSize < maxJsonBody) {
+			maxJsonBody = configSnapshot.maxJsonDocumentSize;
 		}
 		LinkResult bodyResult = link_internal::linkBodyFromJson(json, maxJsonBody, body);
 		if (!bodyResult) {
@@ -665,6 +671,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void invokeCancelled(QueuedRequest &request);
 	void processRequest(QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;
+	LinkResult getConfigSnapshot(LinkConfig &out) const;
 	bool shouldUsePsramStack() const;
 	LinkResult addJsonAccept(LinkHeaders &headers) const;
 	LinkResult deinitInternal(bool waitForever);
