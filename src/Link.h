@@ -9,8 +9,8 @@
 #include "internal/LinkTaskSupport.h"
 
 #include <cstddef>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <new>
 #include <type_traits>
@@ -52,44 +52,17 @@ enum class LinkErrorCode : uint8_t {
 	InternalError
 };
 
-enum class LinkState : uint8_t {
-	Uninitialized,
-	Starting,
-	Running,
-	Stopping
-};
+enum class LinkState : uint8_t { Uninitialized, Starting, Running, Stopping };
 
-enum class LinkStackType : uint8_t {
-	Internal,
-	Psram,
-	Auto
-};
+enum class LinkStackType : uint8_t { Internal, Psram, Auto };
 
-enum class LinkMethod : uint8_t {
-	Get,
-	Post,
-	Put,
-	Patch,
-	Delete,
-	Head
-};
+enum class LinkMethod : uint8_t { Get, Post, Put, Patch, Delete, Head };
 
-enum class LinkResponseMode : uint8_t {
-	Buffered,
-	Stream
-};
+enum class LinkResponseMode : uint8_t { Buffered, Stream };
 
-enum class LinkBodyType : uint8_t {
-	None,
-	Text,
-	Json,
-	Binary
-};
+enum class LinkBodyType : uint8_t { None, Text, Json, Binary };
 
-enum class LinkStreamAction : uint8_t {
-	Continue,
-	Cancel
-};
+enum class LinkStreamAction : uint8_t { Continue, Cancel };
 
 struct LinkError {
 	LinkErrorCode code = LinkErrorCode::Ok;
@@ -228,7 +201,8 @@ class LinkBody {
 
   private:
 	friend struct LinkBodyBuilder;
-	friend LinkResult link_internal::linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out);
+	friend LinkResult
+	link_internal::linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out);
 
 	LinkBodyType _type = LinkBodyType::None;
 	LinkOwnedBuffer _buffer;
@@ -421,14 +395,20 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		onStreamEnd = request.onStreamEnd;
 
 		if (responseMode == LinkResponseMode::Buffered && !parseJsonResponse && !onResponse) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "response callback is required");
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is required"
+			);
 		}
 		if (parseJsonResponse && !onJsonResponse) {
 			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "json callback is required");
 		}
 		if (responseMode == LinkResponseMode::Stream &&
 		    (!onStreamStart || !onStreamChunk || !onStreamEnd)) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "stream callbacks are required");
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "stream callbacks are required"
+			);
 		}
 		return LinkResult::ok();
 	}
@@ -479,7 +459,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return headerResult;
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "response callback is too large");
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is too large"
+			);
 		}
 		return fetch(request);
 	}
@@ -491,12 +474,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 	}
 
 	template <typename Callback>
-	LinkResult post(
-	    const char *url,
-	    const LinkHeaders &headers,
-	    const LinkBody &body,
-	    Callback &&callback
-	) {
+	LinkResult
+	post(const char *url, const LinkHeaders &headers, const LinkBody &body, Callback &&callback) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -509,7 +488,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return bodyResult;
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "response callback is too large");
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is too large"
+			);
 		}
 		return fetch(request);
 	}
@@ -547,10 +529,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	template <typename Callback>
 	LinkResult postJson(
-	    const char *url,
-	    const LinkHeaders &headers,
-	    const JsonDocument &json,
-	    Callback &&callback
+	    const char *url, const LinkHeaders &headers, const JsonDocument &json, Callback &&callback
 	) {
 		LinkBody body;
 		LinkConfig configSnapshot;
@@ -597,10 +576,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	template <typename StartCallback, typename ChunkCallback, typename EndCallback>
 	LinkResult getStream(
-	    const char *url,
-	    StartCallback &&onStart,
-	    ChunkCallback &&onChunk,
-	    EndCallback &&onEnd
+	    const char *url, StartCallback &&onStart, ChunkCallback &&onChunk, EndCallback &&onEnd
 	) {
 		LinkHeaders headers;
 		return getStream(
@@ -631,7 +607,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 		if (!request.onStreamStart.assign(std::forward<StartCallback>(onStart)) ||
 		    !request.onStreamChunk.assign(std::forward<ChunkCallback>(onChunk)) ||
 		    !request.onStreamEnd.assign(std::forward<EndCallback>(onEnd))) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge, "stream callback is too large");
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "stream callback is too large"
+			);
 		}
 		return fetch(request);
 	}

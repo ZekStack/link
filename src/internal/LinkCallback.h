@@ -47,10 +47,8 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 		    "Link callback signature does not match"
 		);
 
-		if constexpr (
-		    sizeof(CallableType) > StorageSize ||
-		    alignof(CallableType) > alignof(Storage)
-		) {
+		if constexpr (sizeof(CallableType) > StorageSize ||
+		              alignof(CallableType) > alignof(Storage)) {
 			return false;
 		} else {
 			reset();
@@ -62,7 +60,8 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 				new (destination) CallableType(*reinterpret_cast<const CallableType *>(source));
 			};
 			_move = [](void *destination, void *source) {
-				new (destination) CallableType(std::move(*reinterpret_cast<CallableType *>(source)));
+				new (destination)
+				    CallableType(std::move(*reinterpret_cast<CallableType *>(source)));
 			};
 			_destroy = [](void *storage) {
 				reinterpret_cast<CallableType *>(storage)->~CallableType();
@@ -103,10 +102,8 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 	}
 
 	template <typename Instance>
-	static BoundConstMethod<Instance> bind(
-	    const Instance *instance,
-	    ReturnType (Instance::*method)(Args...) const
-	) {
+	static BoundConstMethod<Instance>
+	bind(const Instance *instance, ReturnType (Instance::*method)(Args...) const) {
 		return BoundConstMethod<Instance>{instance, method};
 	}
 
@@ -126,7 +123,10 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 
 	ReturnType operator()(Args... args) const {
 		if constexpr (std::is_void_v<ReturnType>) {
-			_invoke(const_cast<void *>(static_cast<const void *>(&_storage)), std::forward<Args>(args)...);
+			_invoke(
+			    const_cast<void *>(static_cast<const void *>(&_storage)),
+			    std::forward<Args>(args)...
+			);
 		} else {
 			return _invoke(
 			    const_cast<void *>(static_cast<const void *>(&_storage)),

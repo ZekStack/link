@@ -25,16 +25,17 @@ void setup() {
 	payload["device"] = "esp32";
 	payload["online"] = true;
 
-	client.postJson("https://example.com/api/devices", payload, [](const LinkJsonResponse &response) {
-		if (!response) {
-			Serial.println(response.error.message);
-			return;
-		}
+	client
+	    .postJson("https://example.com/api/devices", payload, [](const LinkJsonResponse &response) {
+		    if (!response) {
+			    Serial.println(response.error.message);
+			    return;
+		    }
 
-		Serial.println(response.httpStatus);
-		serializeJson(response.json, Serial);
-		Serial.println();
-	});
+		    Serial.println(response.httpStatus);
+		    serializeJson(response.json, Serial);
+		    Serial.println();
+	    });
 }
 
 void loop() {

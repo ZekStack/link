@@ -17,11 +17,7 @@
 
 namespace link_internal {
 
-enum class LinkRedirectAction : uint8_t {
-	None,
-	Follow,
-	Error
-};
+enum class LinkRedirectAction : uint8_t { None, Follow, Error };
 
 struct LinkRedirectDecision {
 	LinkRedirectAction action = LinkRedirectAction::None;
@@ -72,7 +68,10 @@ inline LinkRedirectDecision linkEvaluateRedirect(
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &config) const {
 	if (config.queueSize == 0 || config.maxConcurrentRequests == 0) {
-		return LinkResult::error(LinkErrorCode::InvalidConfig, "queue and concurrency must be nonzero");
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "queue and concurrency must be nonzero"
+		);
 	}
 	if (config.queueSize < config.maxConcurrentRequests) {
 		return LinkResult::error(
@@ -83,11 +82,11 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 	if (!link_task_support::isValidStackSize(config.stackSizeBytes)) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "worker stack size is invalid");
 	}
-	if (config.defaultTimeoutMs == 0 || config.maxUrlSize == 0 ||
-	    config.maxRequestBodySize == 0 || config.maxResponseBodySize == 0 ||
-	    config.maxJsonDocumentSize == 0 || config.maxHeaderCount == 0 ||
-	    config.maxHeaderNameSize == 0 || config.maxHeaderValueSize == 0 ||
-	    config.maxTotalHeaderSize == 0 || config.streamChunkSize == 0) {
+	if (config.defaultTimeoutMs == 0 || config.maxUrlSize == 0 || config.maxRequestBodySize == 0 ||
+	    config.maxResponseBodySize == 0 || config.maxJsonDocumentSize == 0 ||
+	    config.maxHeaderCount == 0 || config.maxHeaderNameSize == 0 ||
+	    config.maxHeaderValueSize == 0 || config.maxTotalHeaderSize == 0 ||
+	    config.streamChunkSize == 0) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "memory limits must be nonzero");
 	}
 	if (config.maxHeaderNameSize + config.maxHeaderValueSize > config.maxTotalHeaderSize) {
@@ -128,7 +127,10 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 		}
 		if (_state != LinkState::Uninitialized) {
-			return LinkResult::error(LinkErrorCode::AlreadyInitialized, "link is already initialized");
+			return LinkResult::error(
+			    LinkErrorCode::AlreadyInitialized,
+			    "link is already initialized"
+			);
 		}
 		LinkResult configResult = validateConfig(config);
 		if (!configResult) {
@@ -151,7 +153,10 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			_queue = nullptr;
 			_workers = nullptr;
 			_state = LinkState::Uninitialized;
-			return LinkResult::error(LinkErrorCode::AllocationFailed, "link storage allocation failed");
+			return LinkResult::error(
+			    LinkErrorCode::AllocationFailed,
+			    "link storage allocation failed"
+			);
 		}
 		for (size_t i = 0; i < config.queueSize; ++i) {
 			_slotUsed[i] = false;
@@ -205,7 +210,10 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 				xSemaphoreGive(_items);
 			}
 			forceDeinitBlocking();
-			return LinkResult::error(LinkErrorCode::AllocationFailed, "worker task creation failed");
+			return LinkResult::error(
+			    LinkErrorCode::AllocationFailed,
+			    "worker task creation failed"
+			);
 		}
 		_workers[i].active = true;
 	}
@@ -226,8 +234,7 @@ template <size_t CallbackStorageSize> LinkResult LinkClient<CallbackStorageSize>
 	return deinitInternal(false);
 }
 
-template <size_t CallbackStorageSize>
-void LinkClient<CallbackStorageSize>::forceDeinitBlocking() {
+template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::forceDeinitBlocking() {
 	(void)deinitInternal(true);
 }
 
@@ -340,8 +347,7 @@ LinkResult LinkClient<CallbackStorageSize>::deinitInternal(bool waitForever) {
 	return freeRuntimeStorage();
 }
 
-template <size_t CallbackStorageSize>
-bool LinkClient<CallbackStorageSize>::isInitialized() const {
+template <size_t CallbackStorageSize> bool LinkClient<CallbackStorageSize>::isInitialized() const {
 	LinkLock lock(const_cast<LinkMutex &>(_mutex));
 	return lock && _state == LinkState::Running;
 }
@@ -442,7 +448,8 @@ void LinkClient<CallbackStorageSize>::releaseSlot(size_t slotIndex) {
 	_slotUsed[slotIndex] = false;
 }
 
-template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::cancelPendingRequests() {
+template <size_t CallbackStorageSize>
+void LinkClient<CallbackStorageSize>::cancelPendingRequests() {
 	while (true) {
 		size_t slotIndex = 0;
 		if (!popRequest(slotIndex)) {
@@ -487,8 +494,7 @@ void LinkClient<CallbackStorageSize>::invokeCancelled(QueuedRequest &request) {
 	}
 }
 
-template <size_t CallbackStorageSize>
-void LinkClient<CallbackStorageSize>::taskEntry(void *arg) {
+template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::taskEntry(void *arg) {
 	WorkerRecord *worker = static_cast<WorkerRecord *>(arg);
 	if (worker != nullptr && worker->owner != nullptr) {
 		worker->owner->workerLoop(worker);
@@ -604,7 +610,7 @@ inline bool isHttps(const char *url) {
 }
 
 inline bool getSocketError(esp_http_client_handle_t client, int &socketError) {
-#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) && \
+#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) &&                                    \
     ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 	if (client == nullptr) {
 		return false;
@@ -619,7 +625,7 @@ inline bool getSocketError(esp_http_client_handle_t client, int &socketError) {
 }
 
 inline bool hasTlsError(esp_http_client_handle_t client) {
-#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) && \
+#if defined(ESP_IDF_VERSION) && defined(ESP_IDF_VERSION_VAL) &&                                    \
     ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 	if (client == nullptr) {
 		return false;
@@ -766,11 +772,8 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 				context->responseTooLarge = true;
 				return ESP_FAIL;
 			}
-			if (!context->response->body.append(
-			        static_cast<const uint8_t *>(event->data),
-			        chunkSize,
-			        true
-			    )) {
+			if (!context->response->body
+			         .append(static_cast<const uint8_t *>(event->data), chunkSize, true)) {
 				context->response->error = {
 				    LinkErrorCode::AllocationFailed,
 				    "response body allocation failed"
@@ -787,10 +790,8 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 
 template <size_t CallbackStorageSize>
 void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request) {
-	char *currentUrl = link_memory::duplicateString(
-	    request.url.c_str(),
-	    std::strlen(request.url.c_str())
-	);
+	char *currentUrl =
+	    link_memory::duplicateString(request.url.c_str(), std::strlen(request.url.c_str()));
 	if (currentUrl == nullptr) {
 		if (request.responseMode == LinkResponseMode::Stream) {
 			LinkStreamResult result;
@@ -864,7 +865,11 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 
 		esp_http_client_set_method(client, link_internal_http::toEspMethod(request.method));
 		for (size_t i = 0; i < request.headers.size(); ++i) {
-			esp_http_client_set_header(client, request.headers.nameAt(i), request.headers.valueAt(i));
+			esp_http_client_set_header(
+			    client,
+			    request.headers.nameAt(i),
+			    request.headers.valueAt(i)
+			);
 		}
 		if (request.body.size() > 0) {
 			esp_http_client_set_post_field(
@@ -893,8 +898,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 
 		if (response.error.code == LinkErrorCode::Ok) {
 			const LinkHeaders &responseHeaders = request.responseMode == LinkResponseMode::Stream
-			                                             ? context.streamInfo.headers
-			                                             : response.headers;
+			                                         ? context.streamInfo.headers
+			                                         : response.headers;
 			const link_internal::LinkRedirectDecision redirect =
 			    link_internal::linkEvaluateRedirect(
 			        _config,
@@ -906,10 +911,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 			if (redirect.action == link_internal::LinkRedirectAction::Error) {
 				response.error = redirect.error;
 			} else if (redirect.action == link_internal::LinkRedirectAction::Follow) {
-				char *nextUrl = link_memory::duplicateString(
-				    redirect.location,
-				    std::strlen(redirect.location)
-				);
+				char *nextUrl =
+				    link_memory::duplicateString(redirect.location, std::strlen(redirect.location));
 				if (nextUrl == nullptr) {
 					response.error = {
 					    LinkErrorCode::AllocationFailed,
@@ -953,13 +956,13 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 					    "json document is too large"
 					};
 				} else {
-					DeserializationError jsonError =
-					    deserializeJson(jsonResponse.json, response.body.c_str(), response.body.size());
+					DeserializationError jsonError = deserializeJson(
+					    jsonResponse.json,
+					    response.body.c_str(),
+					    response.body.size()
+					);
 					if (jsonError) {
-						jsonResponse.error = {
-						    LinkErrorCode::JsonParseFailed,
-						    "json parse failed"
-						};
+						jsonResponse.error = {LinkErrorCode::JsonParseFailed, "json parse failed"};
 					}
 				}
 			}

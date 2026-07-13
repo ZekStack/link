@@ -260,7 +260,10 @@ LinkResult LinkHeaders::ensureStorage() {
 	}
 	_entries = new (std::nothrow) Entry[_maxHeaderCount];
 	if (_entries == nullptr) {
-		return LinkResult::error(LinkErrorCode::AllocationFailed, "header storage allocation failed");
+		return LinkResult::error(
+		    LinkErrorCode::AllocationFailed,
+		    "header storage allocation failed"
+		);
 	}
 	_capacity = _maxHeaderCount;
 	return LinkResult::ok();

@@ -68,26 +68,16 @@ void testRedirectDecisions() {
 
 	const int followedStatuses[] = {301, 302, 303, 307, 308};
 	for (int status : followedStatuses) {
-		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config,
-		    LinkMethod::Get,
-		    status,
-		    headers,
-		    0
-		);
+		const link_internal::LinkRedirectDecision decision =
+		    link_internal::linkEvaluateRedirect(config, LinkMethod::Get, status, headers, 0);
 		assert(decision.action == link_internal::LinkRedirectAction::Follow);
 		assert(std::strcmp(decision.location, "https://example.com/final") == 0);
 	}
 
 	const int finalStatuses[] = {200, 300, 304, 305, 306, 404};
 	for (int status : finalStatuses) {
-		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config,
-		    LinkMethod::Get,
-		    status,
-		    headers,
-		    0
-		);
+		const link_internal::LinkRedirectDecision decision =
+		    link_internal::linkEvaluateRedirect(config, LinkMethod::Get, status, headers, 0);
 		assert(decision.action == link_internal::LinkRedirectAction::None);
 	}
 
@@ -141,9 +131,7 @@ void testCallbacks() {
 	callback(response);
 
 	int called = 0;
-	assert(callback.assign([&called](const LinkResponse &) {
-		called++;
-	}));
+	assert(callback.assign([&called](const LinkResponse &) { called++; }));
 	callback(response);
 	assert(called == 1);
 
@@ -155,7 +143,9 @@ void testCallbacks() {
 	};
 
 	Handler handler;
-	assert(callback.assign(LinkCallback<void(const LinkResponse &), 64>::bind(&handler, &Handler::handle)));
+	assert(callback.assign(
+	    LinkCallback<void(const LinkResponse &), 64>::bind(&handler, &Handler::handle)
+	));
 	callback(response);
 	assert(handler.called == 1);
 
@@ -203,7 +193,10 @@ void testRequestValidation() {
 	config.maxUrlSize = 12;
 	assert(link.init(config));
 	assert(link.get("ftp://bad", [](const LinkResponse &) {}).code == LinkErrorCode::InvalidUrl);
-	assert(link.get("https://example.com/too-long", [](const LinkResponse &) {}).code == LinkErrorCode::UrlTooLarge);
+	assert(
+	    link.get("https://example.com/too-long", [](const LinkResponse &) {}).code ==
+	    LinkErrorCode::UrlTooLarge
+	);
 	assert(link.deinit());
 }
 

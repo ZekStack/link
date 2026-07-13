@@ -145,7 +145,8 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
-	bool append(const uint8_t *data, size_t size, bool nulTerminate = false, bool preferPsram = true) {
+	bool
+	append(const uint8_t *data, size_t size, bool nulTerminate = false, bool preferPsram = true) {
 		if (size == 0) {
 			if (nulTerminate && _data == nullptr) {
 				return assignText("", 0, preferPsram);

@@ -19,7 +19,7 @@ extern "C" {
 #define LINK_HAS_IDF_TASK_CAPS 0
 #endif
 
-#if LINK_HAS_IDF_TASK_CAPS && defined(configSUPPORT_STATIC_ALLOCATION) &&                         \
+#if LINK_HAS_IDF_TASK_CAPS && defined(configSUPPORT_STATIC_ALLOCATION) &&                          \
     (configSUPPORT_STATIC_ALLOCATION == 1) && defined(MALLOC_CAP_SPIRAM)
 #define LINK_CAN_USE_EXTERNAL_STACKS 1
 #else
@@ -92,14 +92,7 @@ inline BaseType_t createTask(
 #endif
 	}
 	if (coreId == tskNO_AFFINITY) {
-		return xTaskCreate(
-		    entry,
-		    name,
-		    static_cast<uint32_t>(stackBytes),
-		    arg,
-		    priority,
-		    handle
-		);
+		return xTaskCreate(entry, name, static_cast<uint32_t>(stackBytes), arg, priority, handle);
 	}
 	return xTaskCreatePinnedToCore(
 	    entry,
