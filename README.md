@@ -99,7 +99,7 @@ void loop() {
 * HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
 * `deinit()` cancels queued requests and waits for active worker requests to exit. If the public wait times out, Link stays in `Stopping` and keeps worker-owned storage alive so a later `deinit()` can finish cleanup.
 * The destructor performs blocking shutdown. It assumes active HTTP operations eventually return through their configured nonzero request timeout.
-* Redirect following is limited to GET requests in buffered mode with absolute `http://` or `https://` `Location` headers.
+* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Buffered and streaming requests use the same redirect limits.
 
 ## Examples
 

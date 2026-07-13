@@ -654,9 +654,12 @@ template <size_t CallbackStorageSize> class LinkClient {
 		LinkResponse *response = nullptr;
 		LinkStreamInfo streamInfo;
 		bool streamStarted = false;
+		bool streamDispositionSet = false;
+		bool suppressStreamCallbacks = false;
 		bool cancelled = false;
 		bool responseTooLarge = false;
 		bool headerFailed = false;
+		uint8_t redirectCount = 0;
 		size_t totalReceived = 0;
 	};
 

@@ -15,6 +15,60 @@
 #endif
 #endif
 
+namespace link_internal {
+
+enum class LinkRedirectAction : uint8_t {
+	None,
+	Follow,
+	Error
+};
+
+struct LinkRedirectDecision {
+	LinkRedirectAction action = LinkRedirectAction::None;
+	const char *location = nullptr;
+	LinkError error;
+};
+
+inline bool linkIsRedirectStatus(int status) {
+	return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+}
+
+inline LinkRedirectDecision linkEvaluateRedirect(
+    const LinkConfig &config,
+    LinkMethod method,
+    int status,
+    const LinkHeaders &headers,
+    uint8_t redirectCount
+) {
+	LinkRedirectDecision decision;
+	if (!config.followRedirects || method != LinkMethod::Get || !linkIsRedirectStatus(status)) {
+		return decision;
+	}
+
+	const char *location = headers.get("Location");
+	if (location == nullptr || !linkUrlLooksValid(location)) {
+		return decision;
+	}
+
+	decision.location = location;
+	if (redirectCount >= config.maxRedirects) {
+		decision.action = LinkRedirectAction::Error;
+		decision.error = {LinkErrorCode::RedirectLimitReached, "redirect limit reached"};
+		return decision;
+	}
+
+	if (std::strlen(location) > config.maxUrlSize) {
+		decision.action = LinkRedirectAction::Error;
+		decision.error = {LinkErrorCode::UrlTooLarge, "redirect url is too large"};
+		return decision;
+	}
+
+	decision.action = LinkRedirectAction::Follow;
+	return decision;
+}
+
+} // namespace link_internal
+
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &config) const {
 	if (config.queueSize == 0 || config.maxConcurrentRequests == 0) {
@@ -634,10 +688,6 @@ inline LinkError mapEspError(esp_err_t err, esp_http_client_handle_t client, con
 	return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
 }
 
-inline bool isRedirectStatus(int status) {
-	return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
-}
-
 } // namespace link_internal_http
 
 template <size_t CallbackStorageSize>
@@ -672,9 +722,26 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			return ESP_FAIL;
 		}
 		if (context->request->responseMode == LinkResponseMode::Stream) {
-			if (!context->streamStarted) {
+			if (!context->streamDispositionSet) {
 				context->streamInfo.httpStatus = esp_http_client_get_status_code(event->client);
-				context->streamInfo.contentLength = esp_http_client_get_content_length(event->client);
+				context->streamInfo.contentLength =
+				    esp_http_client_get_content_length(event->client);
+				const link_internal::LinkRedirectDecision redirect =
+				    link_internal::linkEvaluateRedirect(
+				        context->owner->_config,
+				        context->request->method,
+				        context->streamInfo.httpStatus,
+				        context->streamInfo.headers,
+				        context->redirectCount
+				    );
+				context->suppressStreamCallbacks =
+				    redirect.action != link_internal::LinkRedirectAction::None;
+				context->streamDispositionSet = true;
+			}
+			if (context->suppressStreamCallbacks) {
+				break;
+			}
+			if (!context->streamStarted) {
 				context->request->onStreamStart(context->streamInfo);
 				context->streamStarted = true;
 			}
@@ -755,6 +822,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 		context.owner = this;
 		context.request = &request;
 		context.response = &response;
+		context.redirectCount = redirects;
 		context.streamInfo.headers.configureLimits(
 		    _config.maxHeaderCount,
 		    _config.maxHeaderNameSize,
@@ -823,31 +891,35 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 			response.error = transportError;
 		}
 
-		if (response.error.code == LinkErrorCode::Ok && request.method == LinkMethod::Get &&
-		    request.responseMode == LinkResponseMode::Buffered && _config.followRedirects &&
-		    link_internal_http::isRedirectStatus(response.httpStatus)) {
-			const char *location = response.headers.get("Location");
-			if (location != nullptr && link_internal::linkUrlLooksValid(location)) {
-				if (redirects >= _config.maxRedirects) {
+		if (response.error.code == LinkErrorCode::Ok) {
+			const LinkHeaders &responseHeaders = request.responseMode == LinkResponseMode::Stream
+			                                             ? context.streamInfo.headers
+			                                             : response.headers;
+			const link_internal::LinkRedirectDecision redirect =
+			    link_internal::linkEvaluateRedirect(
+			        _config,
+			        request.method,
+			        response.httpStatus,
+			        responseHeaders,
+			        redirects
+			    );
+			if (redirect.action == link_internal::LinkRedirectAction::Error) {
+				response.error = redirect.error;
+			} else if (redirect.action == link_internal::LinkRedirectAction::Follow) {
+				char *nextUrl = link_memory::duplicateString(
+				    redirect.location,
+				    std::strlen(redirect.location)
+				);
+				if (nextUrl == nullptr) {
 					response.error = {
-					    LinkErrorCode::RedirectLimitReached,
-					    "redirect limit reached"
+					    LinkErrorCode::AllocationFailed,
+					    "redirect url allocation failed"
 					};
-				} else if (std::strlen(location) > _config.maxUrlSize) {
-					response.error = {LinkErrorCode::UrlTooLarge, "redirect url is too large"};
 				} else {
-					char *nextUrl = link_memory::duplicateString(location, std::strlen(location));
-					if (nextUrl == nullptr) {
-						response.error = {
-						    LinkErrorCode::AllocationFailed,
-						    "redirect url allocation failed"
-						};
-					} else {
-						link_memory::release(currentUrl);
-						currentUrl = nextUrl;
-						redirects++;
-						continue;
-					}
+					link_memory::release(currentUrl);
+					currentUrl = nextUrl;
+					redirects++;
+					continue;
 				}
 			}
 		}

@@ -82,4 +82,4 @@ LinkBody::bytes(data, size);
 
 Queued requests own copied URL, header, body, and callback data.
 
-When `followRedirects` is enabled, automatic redirects are limited to GET requests in buffered mode with absolute `http://` or `https://` `Location` headers.
+When `followRedirects` is enabled, automatic redirects are limited to GET requests with absolute `http://` or `https://` `Location` headers. Buffered and streaming requests both enforce `maxRedirects` and `maxUrlSize`.
