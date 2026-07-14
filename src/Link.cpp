@@ -380,36 +380,52 @@ LinkBody &LinkBody::operator=(const LinkBody &other) {
 	return *this;
 }
 
-LinkBody LinkBody::none() {
-	return LinkBody{};
+LinkBodyView LinkBodyView::none() {
+	return LinkBodyView{};
 }
 
-LinkBody LinkBody::text(const char *value) {
-	LinkBody body;
+LinkBodyView LinkBodyView::text(const char *value) {
+	LinkBodyView body;
 	body._type = LinkBodyType::Text;
-	const size_t size = boundedLength(value);
-	if (!body._buffer.assignText(value != nullptr ? value : "", size)) {
-		body._status = LinkErrorCode::AllocationFailed;
-	}
+	body._data = reinterpret_cast<const uint8_t *>(value != nullptr ? value : "");
+	body._size = boundedLength(value);
 	return body;
 }
 
-LinkBody LinkBody::json(const JsonDocument &json) {
-	LinkBody body;
-	LinkResult result = link_internal::linkBodyFromJson(json, static_cast<size_t>(-1), body);
-	if (!result) {
-		body._status = result.code;
-	}
+LinkBodyView LinkBodyView::json(const JsonDocument &json) {
+	LinkBodyView body;
+	body._type = LinkBodyType::Json;
+	body._json = &json;
 	return body;
 }
 
-LinkBody LinkBody::bytes(const uint8_t *data, size_t size) {
-	LinkBody body;
+LinkBodyView LinkBodyView::bytes(const uint8_t *data, size_t size) {
+	LinkBodyView body;
 	body._type = LinkBodyType::Binary;
-	if (!body._buffer.assign(data, size)) {
-		body._status = LinkErrorCode::AllocationFailed;
-	}
+	body._data = data;
+	body._size = size;
+	body._valid = data != nullptr || size == 0;
 	return body;
+}
+
+LinkBodyType LinkBodyView::type() const {
+	return _type;
+}
+
+const uint8_t *LinkBodyView::data() const {
+	return _data;
+}
+
+const JsonDocument *LinkBodyView::jsonDocument() const {
+	return _json;
+}
+
+size_t LinkBodyView::size() const {
+	return _size;
+}
+
+bool LinkBodyView::valid() const {
+	return _valid;
 }
 
 LinkBodyType LinkBody::type() const {
@@ -469,28 +485,56 @@ bool linkUrlLooksValid(const char *url) {
 	return std::strncmp(url, "http://", 7) == 0 || std::strncmp(url, "https://", 8) == 0;
 }
 
-LinkResult linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out) {
-	const size_t measured = measureJson(json);
-	if (measured > maxBytes) {
-		return LinkResult::error(LinkErrorCode::RequestTooLarge, "json body is too large");
+LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, LinkBody &out) {
+	if (!view.valid()) {
+		return LinkResult::error(LinkErrorCode::InternalError, "request body view is invalid");
 	}
-	char *buffer = static_cast<char *>(link_memory::allocate(measured + 1));
-	if (buffer == nullptr) {
-		return LinkResult::error(LinkErrorCode::AllocationFailed, "json body allocation failed");
+
+	size_t size = view.size();
+	const JsonDocument *json = view.jsonDocument();
+	if (view.type() == LinkBodyType::Json) {
+		if (json == nullptr) {
+			return LinkResult::error(LinkErrorCode::InternalError, "json body view is invalid");
+		}
+		size = measureJson(*json);
+		if (size > config.maxSerializedJsonSize) {
+			return LinkResult::error(LinkErrorCode::RequestTooLarge, "json body is too large");
+		}
 	}
-	const size_t written = serializeJson(json, buffer, measured + 1);
-	if (written == 0 && measured != 0) {
-		link_memory::release(buffer);
-		return LinkResult::error(LinkErrorCode::JsonSerializeFailed, "json serialization failed");
+	if (size > config.maxRequestBodySize) {
+		return LinkResult::error(LinkErrorCode::RequestTooLarge, "request body is too large");
 	}
-	buffer[written] = '\0';
+
 	out.clear();
-	out._type = LinkBodyType::Json;
-	if (!out._buffer.assignText(buffer, written)) {
-		link_memory::release(buffer);
-		return LinkResult::error(LinkErrorCode::AllocationFailed, "json body copy failed");
+	out._type = view.type();
+	bool allocated = true;
+	switch (view.type()) {
+	case LinkBodyType::None:
+		break;
+	case LinkBodyType::Text:
+		allocated = out._buffer.assignText(reinterpret_cast<const char *>(view.data()), size);
+		break;
+	case LinkBodyType::Binary:
+		allocated = out._buffer.assign(view.data(), size);
+		break;
+	case LinkBodyType::Json:
+		allocated = out._buffer.allocateForWrite(size, true);
+		if (allocated) {
+			const size_t written = serializeJson(*json, out._buffer.c_str(), size + 1);
+			if (written != size) {
+				out.clear();
+				return LinkResult::error(
+				    LinkErrorCode::JsonSerializeFailed,
+				    "json serialization failed"
+				);
+			}
+		}
+		break;
 	}
-	link_memory::release(buffer);
+	if (!allocated) {
+		out.clear();
+		return LinkResult::error(LinkErrorCode::AllocationFailed, "body allocation failed");
+	}
 	return LinkResult::ok();
 }
 

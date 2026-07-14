@@ -8,14 +8,16 @@ Link uses ArduinoJson v7.
 
 JSON request serialization is bounded by:
 
-* `maxJsonDocumentSize`
+* `maxSerializedJsonSize`
 * `maxRequestBodySize`
 
 JSON response parsing is bounded by:
 
 * `maxResponseBodySize`
-* `maxJsonDocumentSize`
+* `maxSerializedJsonSize`
 
-If the HTTP body exceeds the response body limit, Link returns `ResponseTooLarge`. If the buffered body fits but cannot be parsed as JSON or exceeds the JSON document limit, Link returns `JsonParseFailed`.
+If the HTTP body exceeds the response body limit, Link returns `ResponseTooLarge`. If the buffered body fits but cannot be parsed as JSON or exceeds the serialized JSON limit, Link returns `JsonParseFailed`.
+
+`maxSerializedJsonSize` limits the serialized input bytes passed to ArduinoJson. It does not cap the heap used by the parsed `JsonDocument`; parsed nodes and copied strings add structure-dependent overhead. Peak response memory includes both the buffered input and the parsed document.
 
 `LinkJsonResponse::json` is valid only during the callback unless copied by the user.

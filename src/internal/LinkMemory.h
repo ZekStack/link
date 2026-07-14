@@ -125,6 +125,28 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
+	bool allocateForWrite(size_t size, bool nulTerminate, bool preferPsram = true) {
+		clear();
+		const size_t capacity = size + (nulTerminate ? 1 : 0);
+		if (capacity < size) {
+			return false;
+		}
+		if (capacity == 0) {
+			return true;
+		}
+		_data = static_cast<uint8_t *>(link_memory::allocate(capacity, preferPsram));
+		if (_data == nullptr) {
+			return false;
+		}
+		_size = size;
+		_capacity = capacity;
+		_nulTerminated = nulTerminate;
+		if (nulTerminate) {
+			_data[size] = '\0';
+		}
+		return true;
+	}
+
 	bool reserve(size_t capacity, bool preferPsram = true) {
 		if (capacity <= _capacity) {
 			return true;

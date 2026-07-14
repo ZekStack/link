@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -35,22 +36,82 @@ void testHeaders() {
 }
 
 void testBody() {
-	LinkBody text = LinkBody::text("hello");
+	LinkConfig config;
+	config.maxRequestBodySize = 5;
+	config.maxSerializedJsonSize = 5;
+
+	LinkBody text;
+	assert(link_internal::linkBodyFromView(LinkBodyView::text("hello"), config, text));
 	assert(text.valid());
 	assert(text.size() == 5);
 	assert(std::strcmp(text.c_str(), "hello") == 0);
 
 	const uint8_t data[] = {1, 2, 3};
-	LinkBody bytes = LinkBody::bytes(data, sizeof(data));
+	LinkBody bytes;
+	assert(link_internal::linkBodyFromView(LinkBodyView::bytes(data, sizeof(data)), config, bytes));
 	assert(bytes.valid());
 	assert(bytes.size() == 3);
 	assert(bytes.data()[1] == 2);
+	assert(
+	    link_internal::linkBodyFromView(LinkBodyView::bytes(nullptr, 1), config, bytes).code ==
+	    LinkErrorCode::InternalError
+	);
 
 	LinkBody copy;
 	assert(copy.copyFrom(text));
 	assert(copy.valid());
 	assert(copy.size() == 5);
 	assert(std::strcmp(copy.c_str(), "hello") == 0);
+
+	LinkBody oversized;
+	assert(
+	    link_internal::linkBodyFromView(LinkBodyView::text("123456"), config, oversized).code ==
+	    LinkErrorCode::RequestTooLarge
+	);
+	assert(oversized.size() == 0);
+
+	JsonDocument json;
+	json.setRaw("12345");
+	LinkBody jsonBody;
+	assert(link_internal::linkBodyFromView(LinkBodyView::json(json), config, jsonBody));
+	assert(jsonBody.type() == LinkBodyType::Json);
+	assert(jsonBody.size() == 5);
+	assert(std::strcmp(jsonBody.c_str(), "12345") == 0);
+	json.setRaw("123456");
+	assert(
+	    link_internal::linkBodyFromView(LinkBodyView::json(json), config, jsonBody).code ==
+	    LinkErrorCode::RequestTooLarge
+	);
+}
+
+void testWorkerSignalCapacity() {
+	LinkConfig config;
+	config.queueSize = 3;
+	config.maxConcurrentRequests = 3;
+	UBaseType_t capacity = 0;
+	assert(link_internal::linkWorkerSignalCapacity(config, capacity));
+	assert(capacity == 6);
+
+	// A full queue consumes all request permits. Shutdown must still be able to add one
+	// independent permit per worker, including when workers race for the final request.
+	UBaseType_t permits = static_cast<UBaseType_t>(config.queueSize);
+	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
+		assert(permits < capacity);
+		permits++;
+	}
+	for (size_t i = 0; i < config.queueSize; ++i) {
+		assert(permits > 0);
+		permits--;
+	}
+	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
+		assert(permits > 0);
+		permits--;
+	}
+	assert(permits == 0);
+
+	config.queueSize = std::numeric_limits<size_t>::max();
+	config.maxConcurrentRequests = 1;
+	assert(!link_internal::linkWorkerSignalCapacity(config, capacity));
 }
 
 void testOwnedBufferAppend() {
@@ -336,6 +397,7 @@ int main() {
 	testResultAndStateStrings();
 	testHeaders();
 	testBody();
+	testWorkerSignalCapacity();
 	testOwnedBufferAppend();
 	testOperationErrorsTakePrecedence();
 	testRedirectDecisions();

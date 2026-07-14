@@ -12,7 +12,7 @@ Link helps you communicate with APIs and backend services in Arduino ESP32 proje
 
 * **Fetch-style requests** - submit `get`, `post`, `getJson`, `postJson`, or `getStream` work from normal FreeRTOS tasks.
 * **Concurrent workers** - run more than one HTTP request at the same time with a bounded worker pool.
-* **ESP32-friendly memory** - request bodies, response bodies, URLs, headers, JSON, callbacks, and stream buffers have explicit limits.
+* **ESP32-friendly memory** - accepted request bodies, response bodies, URLs, headers, serialized JSON, callbacks, and stream buffers have explicit limits.
 * **Clear API** - operations return `LinkResult`; HTTP status codes stay separate from transport failures.
 * **Production-minded** - no exceptions, FreeRTOS mutex protection, bindable callbacks, and PSRAM-preferred payload buffers.
 
@@ -164,7 +164,7 @@ For the full API, see [`docs/api.md`](docs/api.md).
 | PSRAM | Payload buffers prefer PSRAM; worker stacks can optionally use PSRAM |
 | Dependencies | `bblanchon/ArduinoJson >= 7.0.0` |
 | Exceptions | Not used |
-| Status | Early-stage `0.0.1` |
+| Status | `0.1.0` |
 
 ## Configuration
 
@@ -176,7 +176,7 @@ config.defaultTimeoutMs = 15000;
 config.maxUrlSize = 512;
 config.maxRequestBodySize = 8192;
 config.maxResponseBodySize = 8192;
-config.maxJsonDocumentSize = 8192;
+config.maxSerializedJsonSize = 8192;
 config.maxTotalHeaderSize = 4096;
 config.streamChunkSize = 1024;
 config.allowCrossOriginRedirects = false;
@@ -184,6 +184,10 @@ config.allowHttpsToHttpRedirects = false;
 ```
 
 `queueSize` is the maximum number of accepted in-flight requests, including queued and actively running requests. It must be at least `maxConcurrentRequests`.
+
+Request body factories return non-owning `LinkBodyView` values. Link validates a view against the active configuration and copies it into owned queue storage before submission returns. The source text, bytes, or `JsonDocument` therefore only needs to remain valid until `fetch()`, `post()`, or `postJson()` returns.
+
+`maxSerializedJsonSize` limits serialized JSON request and response bytes. ArduinoJson's parsed document uses additional heap memory based on the JSON structure.
 
 For all options, see [`docs/memory.md`](docs/memory.md).
 

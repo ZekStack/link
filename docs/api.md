@@ -69,18 +69,16 @@ client.getStream(url, onStart, onChunk, onEnd);
 
 `LinkHeaders` supports `add`, `set`, `has`, `get`, `size`, `clear`, and `copyFrom`. Header lookup is case-insensitive.
 
-`LinkBody` supports:
+`LinkBodyView` supports:
 
 ```cpp
-LinkBody::none();
-LinkBody::text("hello");
-LinkBody::json(jsonDocument);
-LinkBody::bytes(data, size);
+LinkBodyView::none();
+LinkBodyView::text("hello");
+LinkBodyView::json(jsonDocument);
+LinkBodyView::bytes(data, size);
 ```
 
-`LinkBody` also supports `copyFrom` for explicit failure-aware copies.
-
-Queued requests own copied URL, header, body, and callback data.
+Body views do not allocate and do not own their source data. Link validates and copies a body into owned queue storage before `fetch()`, `post()`, or `postJson()` returns. Queued requests own copied URL, header, serialized body, and callback data.
 
 When `followRedirects` is enabled, automatic redirects are limited to GET requests with absolute `http://` or `https://` `Location` headers. Buffered and streaming requests both enforce `maxRedirects` and `maxUrlSize`.
 

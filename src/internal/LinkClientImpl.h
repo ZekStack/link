@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 #if defined(ESP32)
 #include <errno.h>
 #include <esp_err.h>
@@ -196,6 +198,20 @@ inline LinkRedirectDecision linkEvaluateRedirect(
 	return decision;
 }
 
+inline bool linkWorkerSignalCapacity(const LinkConfig &config, UBaseType_t &out) {
+	constexpr UBaseType_t maximum = std::numeric_limits<UBaseType_t>::max();
+	if (config.queueSize > maximum || config.maxConcurrentRequests > maximum) {
+		return false;
+	}
+	const UBaseType_t queueSize = static_cast<UBaseType_t>(config.queueSize);
+	const UBaseType_t workers = static_cast<UBaseType_t>(config.maxConcurrentRequests);
+	if (queueSize > maximum - workers) {
+		return false;
+	}
+	out = queueSize + workers;
+	return true;
+}
+
 } // namespace link_internal
 
 template <size_t CallbackStorageSize>
@@ -216,7 +232,7 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "worker stack size is invalid");
 	}
 	if (config.defaultTimeoutMs == 0 || config.maxUrlSize == 0 || config.maxRequestBodySize == 0 ||
-	    config.maxResponseBodySize == 0 || config.maxJsonDocumentSize == 0 ||
+	    config.maxResponseBodySize == 0 || config.maxSerializedJsonSize == 0 ||
 	    config.maxHeaderCount == 0 || config.maxHeaderNameSize == 0 ||
 	    config.maxHeaderValueSize == 0 || config.maxTotalHeaderSize == 0 ||
 	    config.streamChunkSize == 0) {
@@ -224,6 +240,13 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 	}
 	if (config.maxHeaderNameSize + config.maxHeaderValueSize > config.maxTotalHeaderSize) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "header total limit is too small");
+	}
+	UBaseType_t signalCapacity = 0;
+	if (!link_internal::linkWorkerSignalCapacity(config, signalCapacity)) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "worker signal capacity is too large"
+		);
 	}
 	return LinkResult::ok();
 }
@@ -234,22 +257,6 @@ bool LinkClient<CallbackStorageSize>::shouldUsePsramStack() const {
 		return true;
 	}
 	return _config.stackType == LinkStackType::Auto && link_task_support::hasExternalStackSupport();
-}
-
-template <size_t CallbackStorageSize>
-LinkResult LinkClient<CallbackStorageSize>::getConfigSnapshot(LinkConfig &out) const {
-	LinkLock lock(const_cast<LinkMutex &>(_mutex));
-	if (!lock) {
-		return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-	}
-	if (_state == LinkState::Stopping) {
-		return LinkResult::error(LinkErrorCode::Stopping, "link is stopping");
-	}
-	if (_state != LinkState::Running) {
-		return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
-	}
-	out = _config;
-	return LinkResult::ok();
 }
 
 template <size_t CallbackStorageSize>
@@ -299,10 +306,19 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		_queueTail = 0;
 		_queueCount = 0;
 		_nextRequestId = 1;
+		_stopWakeIssued = false;
 	}
 
 #if defined(ESP32)
-	_items = xSemaphoreCreateCounting(static_cast<UBaseType_t>(config.queueSize), 0);
+	UBaseType_t signalCapacity = 0;
+	if (!link_internal::linkWorkerSignalCapacity(config, signalCapacity)) {
+		forceDeinitBlocking();
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "worker signal capacity is too large"
+		);
+	}
+	_items = xSemaphoreCreateCounting(signalCapacity, 0);
 	if (_items == nullptr) {
 		delete[] _slots;
 		delete[] _slotUsed;
@@ -319,6 +335,7 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
 		_workers[i].owner = this;
 		_workers[i].index = i;
+		_workers[i].active = true;
 		char name[16]{};
 		snprintf(name, sizeof(name), "link-%u", static_cast<unsigned>(i));
 		const BaseType_t created = link_task_support::createTask(
@@ -333,14 +350,12 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		    _workers[i].createdWithCaps
 		);
 		if (created != pdPASS) {
+			_workers[i].active = false;
 			{
 				LinkLock lock(_mutex);
 				if (lock) {
 					_state = LinkState::Stopping;
 				}
-			}
-			for (size_t n = 0; n < config.maxConcurrentRequests; ++n) {
-				xSemaphoreGive(_items);
 			}
 			forceDeinitBlocking();
 			return LinkResult::error(
@@ -348,7 +363,6 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			    "worker task creation failed"
 			);
 		}
-		_workers[i].active = true;
 	}
 #endif
 
@@ -380,10 +394,13 @@ template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::mark
 
 template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::wakeWorkers() {
 #if defined(ESP32)
-	if (_items != nullptr) {
-		for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
-			xSemaphoreGive(_items);
-		}
+	LinkLock lock(_mutex);
+	if (!lock || _stopWakeIssued || _items == nullptr) {
+		return;
+	}
+	_stopWakeIssued = true;
+	for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
+		xSemaphoreGive(_items);
 	}
 #endif
 }
@@ -450,6 +467,7 @@ LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
 		_queueHead = 0;
 		_queueTail = 0;
 		_queueCount = 0;
+		_stopWakeIssued = false;
 		_config = LinkConfig{};
 		_state = LinkState::Uninitialized;
 	}
@@ -618,6 +636,12 @@ template <size_t CallbackStorageSize>
 void LinkClient<CallbackStorageSize>::workerLoop(WorkerRecord *worker) {
 #if defined(ESP32)
 	while (true) {
+		{
+			LinkLock lock(_mutex);
+			if (lock && _state == LinkState::Stopping && _queueCount == 0) {
+				break;
+			}
+		}
 		if (_items != nullptr) {
 			xSemaphoreTake(_items, portMAX_DELAY);
 		}
@@ -1085,10 +1109,10 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 				jsonResponse.error = {headerCopyResult.code, headerCopyResult.message};
 			}
 			if (jsonResponse.error.code == LinkErrorCode::Ok) {
-				if (response.body.size() > _config.maxJsonDocumentSize) {
+				if (response.body.size() > _config.maxSerializedJsonSize) {
 					jsonResponse.error = {
 					    LinkErrorCode::JsonParseFailed,
-					    "json document is too large"
+					    "serialized json response is too large"
 					};
 				} else {
 					DeserializationError jsonError = deserializeJson(

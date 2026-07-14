@@ -105,7 +105,7 @@ struct LinkConfig {
 	size_t maxUrlSize = 512;
 	size_t maxRequestBodySize = 8192;
 	size_t maxResponseBodySize = 8192;
-	size_t maxJsonDocumentSize = 8192;
+	size_t maxSerializedJsonSize = 8192;
 	size_t maxHeaderCount = 16;
 	size_t maxHeaderNameSize = 64;
 	size_t maxHeaderValueSize = 512;
@@ -119,8 +119,9 @@ struct LinkConfig {
 };
 
 class LinkBody;
+class LinkBodyView;
 namespace link_internal {
-LinkResult linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out);
+LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, LinkBody &out);
 }
 
 class LinkHeaders {
@@ -180,6 +181,27 @@ class LinkHeaders {
 	size_t _maxTotalHeaderSize = 4096;
 };
 
+class LinkBodyView {
+  public:
+	static LinkBodyView none();
+	static LinkBodyView text(const char *value);
+	static LinkBodyView json(const JsonDocument &json);
+	static LinkBodyView bytes(const uint8_t *data, size_t size);
+
+	LinkBodyType type() const;
+	const uint8_t *data() const;
+	const JsonDocument *jsonDocument() const;
+	size_t size() const;
+	bool valid() const;
+
+  private:
+	LinkBodyType _type = LinkBodyType::None;
+	const uint8_t *_data = nullptr;
+	const JsonDocument *_json = nullptr;
+	size_t _size = 0;
+	bool _valid = true;
+};
+
 class LinkBody {
   public:
 	LinkBody() = default;
@@ -187,11 +209,6 @@ class LinkBody {
 	LinkBody &operator=(const LinkBody &other);
 	LinkBody(LinkBody &&other) noexcept = default;
 	LinkBody &operator=(LinkBody &&other) noexcept = default;
-
-	static LinkBody none();
-	static LinkBody text(const char *value);
-	static LinkBody json(const JsonDocument &json);
-	static LinkBody bytes(const uint8_t *data, size_t size);
 
 	LinkBodyType type() const;
 	const uint8_t *data() const;
@@ -203,9 +220,9 @@ class LinkBody {
 	LinkResult copyFrom(const LinkBody &other);
 
   private:
-	friend struct LinkBodyBuilder;
-	friend LinkResult
-	link_internal::linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out);
+	friend LinkResult link_internal::linkBodyFromView(
+	    const LinkBodyView &view, const LinkConfig &config, LinkBody &out
+	);
 
 	LinkBodyType _type = LinkBodyType::None;
 	LinkOwnedBuffer _buffer;
@@ -291,7 +308,7 @@ template <size_t CallbackStorageSize> struct LinkRequestT {
 	LinkMethod method = LinkMethod::Get;
 	const char *url = nullptr;
 	LinkHeaders headers;
-	LinkBody body;
+	LinkBodyView body;
 	uint32_t timeoutMs = 0;
 	LinkResponseMode responseMode = LinkResponseMode::Buffered;
 	bool parseJsonResponse = false;
@@ -314,7 +331,8 @@ using Link = LinkClient<64>;
 namespace link_internal {
 
 bool linkUrlLooksValid(const char *url);
-LinkResult linkBodyFromJson(const JsonDocument &json, size_t maxBytes, LinkBody &out);
+LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, LinkBody &out);
+bool linkWorkerSignalCapacity(const LinkConfig &config, UBaseType_t &out);
 
 template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 	using Request = LinkRequestT<CallbackStorageSize>;
@@ -362,10 +380,6 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		if (!url.assignText(request.url, urlSize)) {
 			return LinkResult::error(LinkErrorCode::AllocationFailed, "url allocation failed");
 		}
-		if (request.body.size() > config.maxRequestBodySize) {
-			return LinkResult::error(LinkErrorCode::RequestTooLarge, "request body is too large");
-		}
-
 		headers.configureLimits(
 		    config.maxHeaderCount,
 		    config.maxHeaderNameSize,
@@ -381,7 +395,7 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 			}
 		}
 
-		LinkResult bodyResult = body.copyFrom(request.body);
+		LinkResult bodyResult = linkBodyFromView(request.body, config, body);
 		if (!bodyResult) {
 			return bodyResult;
 		}
@@ -471,14 +485,15 @@ template <size_t CallbackStorageSize> class LinkClient {
 	}
 
 	template <typename Callback>
-	LinkResult post(const char *url, const LinkBody &body, Callback &&callback) {
+	LinkResult post(const char *url, const LinkBodyView &body, Callback &&callback) {
 		LinkHeaders headers;
 		return post(url, headers, body, std::forward<Callback>(callback));
 	}
 
 	template <typename Callback>
-	LinkResult
-	post(const char *url, const LinkHeaders &headers, const LinkBody &body, Callback &&callback) {
+	LinkResult post(
+	    const char *url, const LinkHeaders &headers, const LinkBodyView &body, Callback &&callback
+	) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -486,10 +501,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 		if (!headerResult) {
 			return headerResult;
 		}
-		LinkResult bodyResult = request.body.copyFrom(body);
-		if (!bodyResult) {
-			return bodyResult;
-		}
+		request.body = body;
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
 			    LinkErrorCode::CallbackTooLarge,
@@ -534,21 +546,6 @@ template <size_t CallbackStorageSize> class LinkClient {
 	LinkResult postJson(
 	    const char *url, const LinkHeaders &headers, const JsonDocument &json, Callback &&callback
 	) {
-		LinkBody body;
-		LinkConfig configSnapshot;
-		LinkResult configResult = getConfigSnapshot(configSnapshot);
-		if (!configResult) {
-			return configResult;
-		}
-		size_t maxJsonBody = configSnapshot.maxRequestBodySize;
-		if (configSnapshot.maxJsonDocumentSize < maxJsonBody) {
-			maxJsonBody = configSnapshot.maxJsonDocumentSize;
-		}
-		LinkResult bodyResult = link_internal::linkBodyFromJson(json, maxJsonBody, body);
-		if (!bodyResult) {
-			return bodyResult;
-		}
-
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -556,10 +553,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 		if (!headerResult) {
 			return headerResult;
 		}
-		LinkResult requestBodyResult = request.body.copyFrom(body);
-		if (!requestBodyResult) {
-			return requestBodyResult;
-		}
+		request.body = LinkBodyView::json(json);
 		request.parseJsonResponse = true;
 		LinkResult acceptResult = addJsonAccept(request.headers);
 		if (!acceptResult) {
@@ -654,7 +648,6 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void invokeCancelled(QueuedRequest &request);
 	void processRequest(QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;
-	LinkResult getConfigSnapshot(LinkConfig &out) const;
 	bool shouldUsePsramStack() const;
 	LinkResult addJsonAccept(LinkHeaders &headers) const;
 	LinkResult deinitInternal(bool waitForever);
@@ -675,6 +668,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	// When deinit() times out, Stopping means workers may still own slots.
 	// Do not free task-owned storage until all workers become inactive.
 	LinkState _state = LinkState::Uninitialized;
+	bool _stopWakeIssued = false;
 	QueuedRequest *_slots = nullptr;
 	bool *_slotUsed = nullptr;
 	size_t *_queue = nullptr;
