@@ -21,12 +21,14 @@ Uninitialized -> Starting -> Running -> Stopping -> Uninitialized
 During `deinit()`:
 
 * new requests return `LinkErrorCode::Stopping`
-* pending queued requests complete with `Cancelled`
+* workers drain pending queued requests and complete them with `Cancelled`
 * active requests observe stopping between blocking HTTP operations where possible
 * request and callback storage is released only after workers exit
 
 If public `deinit()` times out, Link remains in `Stopping` and keeps worker-owned storage alive. Calling `deinit()` again continues waiting and cleanup.
 
 The destructor uses blocking shutdown and does not return until workers have exited. This assumes active HTTP operations eventually return through their configured nonzero request timeout.
+
+Do not call `deinit()` or destroy Link from a Link callback. The callback is executing on a worker that shutdown must wait for, so either operation would deadlock on itself.
 
 User callbacks are never invoked while Link internal mutexes are held.

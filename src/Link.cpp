@@ -60,6 +60,8 @@ const char *linkErrorCodeToString(LinkErrorCode code) {
 		return "SendFailed";
 	case LinkErrorCode::ReceiveFailed:
 		return "ReceiveFailed";
+	case LinkErrorCode::RedirectRejected:
+		return "RedirectRejected";
 	case LinkErrorCode::RedirectLimitReached:
 		return "RedirectLimitReached";
 	case LinkErrorCode::JsonSerializeFailed:

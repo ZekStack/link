@@ -45,6 +45,7 @@ enum class LinkErrorCode : uint8_t {
 	TlsFailed,
 	SendFailed,
 	ReceiveFailed,
+	RedirectRejected,
 	RedirectLimitReached,
 	JsonSerializeFailed,
 	JsonParseFailed,
@@ -112,6 +113,8 @@ struct LinkConfig {
 	size_t streamChunkSize = 1024;
 
 	bool followRedirects = true;
+	bool allowCrossOriginRedirects = false;
+	bool allowHttpsToHttpRedirects = false;
 	uint8_t maxRedirects = 3;
 };
 
@@ -635,9 +638,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 		bool streamStarted = false;
 		bool streamDispositionSet = false;
 		bool suppressStreamCallbacks = false;
-		bool cancelled = false;
-		bool responseTooLarge = false;
-		bool headerFailed = false;
+		LinkError eventError;
+		const char *currentUrl = nullptr;
 		uint8_t redirectCount = 0;
 		size_t totalReceived = 0;
 	};
@@ -649,7 +651,6 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void workerLoop(WorkerRecord *worker);
 	bool popRequest(size_t &slotIndex);
 	void releaseSlot(size_t slotIndex);
-	void cancelPendingRequests();
 	void invokeCancelled(QueuedRequest &request);
 	void processRequest(QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;

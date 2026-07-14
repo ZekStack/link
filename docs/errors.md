@@ -26,6 +26,9 @@ Common response errors:
 | `ReceiveFailed` | ESP reported response read, header fetch, closed connection, incomplete data, or another unmapped transport failure. |
 | `ResponseTooLarge` | Buffered response exceeded `maxResponseBodySize`. |
 | `HeaderTooLarge` | Response headers exceeded configured limits. |
+| `TooManyHeaders` | A response supplied more headers than configured. |
+| `AllocationFailed` | Request setup or response storage allocation failed. |
+| `RedirectRejected` | A redirect violated the cross-origin or HTTPS downgrade policy. |
 | `RedirectLimitReached` | A buffered or streaming GET exceeded `maxRedirects`. |
 | `JsonParseFailed` | JSON parsing failed or exceeded JSON limits. |
 | `Cancelled` | Request was cancelled during shutdown or by stream callback. |

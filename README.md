@@ -97,9 +97,10 @@ void loop() {
 * User callbacks are not called while Link internal mutexes are held.
 * `LinkJsonResponse::json` is valid only during the callback unless the user copies the needed data.
 * HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
-* `deinit()` cancels queued requests and waits for active worker requests to exit. If the public wait times out, Link stays in `Stopping` and keeps worker-owned storage alive so a later `deinit()` can finish cleanup.
+* `deinit()` lets worker tasks cancel queued requests and waits for active workers to exit. If the public wait times out, Link stays in `Stopping` and keeps worker-owned storage alive so a later `deinit()` can finish cleanup.
 * The destructor performs blocking shutdown. It assumes active HTTP operations eventually return through their configured nonzero request timeout.
-* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Buffered and streaming requests use the same redirect limits.
+* Do not call `deinit()` or destroy a `Link` instance from one of its callbacks; shutdown waits for that callback's worker task to exit.
+* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in. Caller-supplied headers are stripped after an origin change.
 
 ## Examples
 
@@ -178,6 +179,8 @@ config.maxResponseBodySize = 8192;
 config.maxJsonDocumentSize = 8192;
 config.maxTotalHeaderSize = 4096;
 config.streamChunkSize = 1024;
+config.allowCrossOriginRedirects = false;
+config.allowHttpsToHttpRedirects = false;
 ```
 
 `queueSize` is the maximum number of accepted in-flight requests, including queued and actively running requests. It must be at least `maxConcurrentRequests`.

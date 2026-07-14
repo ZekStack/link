@@ -83,3 +83,5 @@ LinkBody::bytes(data, size);
 Queued requests own copied URL, header, body, and callback data.
 
 When `followRedirects` is enabled, automatic redirects are limited to GET requests with absolute `http://` or `https://` `Location` headers. Buffered and streaming requests both enforce `maxRedirects` and `maxUrlSize`.
+
+Only same-origin redirects are followed by default. Set `allowCrossOriginRedirects` to opt into origin changes. Link strips all caller-supplied request headers on an allowed origin change, including `Authorization`, `Cookie`, `Proxy-Authorization`, `Host`, and custom API-key headers, and does not restore them later in the redirect chain. Set `allowHttpsToHttpRedirects` as well to explicitly permit a TLS downgrade.

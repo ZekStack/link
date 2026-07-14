@@ -22,8 +22,120 @@ enum class LinkRedirectAction : uint8_t { None, Follow, Error };
 struct LinkRedirectDecision {
 	LinkRedirectAction action = LinkRedirectAction::None;
 	const char *location = nullptr;
+	bool stripRequestHeaders = false;
 	LinkError error;
 };
+
+struct LinkUrlOrigin {
+	const char *host = nullptr;
+	size_t hostSize = 0;
+	uint16_t port = 0;
+	bool https = false;
+	bool valid = false;
+};
+
+inline char linkLowerAscii(char value) {
+	return value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : value;
+}
+
+inline bool linkAsciiEqual(const char *left, size_t leftSize, const char *right, size_t rightSize) {
+	if (left == nullptr || right == nullptr || leftSize != rightSize)
+		return false;
+	for (size_t i = 0; i < leftSize; ++i) {
+		if (linkLowerAscii(left[i]) != linkLowerAscii(right[i]))
+			return false;
+	}
+	return true;
+}
+
+inline LinkUrlOrigin linkParseOrigin(const char *url) {
+	LinkUrlOrigin origin;
+	if (url == nullptr)
+		return origin;
+
+	const char *authority = nullptr;
+	if (std::strncmp(url, "https://", 8) == 0) {
+		origin.https = true;
+		origin.port = 443;
+		authority = url + 8;
+	} else if (std::strncmp(url, "http://", 7) == 0) {
+		origin.port = 80;
+		authority = url + 7;
+	} else {
+		return origin;
+	}
+
+	const char *authorityEnd = authority;
+	while (*authorityEnd != '\0' && *authorityEnd != '/' && *authorityEnd != '?' &&
+	       *authorityEnd != '#') {
+		if (*authorityEnd == '@')
+			return origin;
+		authorityEnd++;
+	}
+	if (authority == authorityEnd)
+		return origin;
+
+	const char *hostBegin = authority;
+	const char *hostEnd = authorityEnd;
+	const char *portBegin = nullptr;
+	if (*hostBegin == '[') {
+		hostBegin++;
+		hostEnd = hostBegin;
+		while (hostEnd < authorityEnd && *hostEnd != ']')
+			hostEnd++;
+		if (hostEnd == authorityEnd || hostEnd == hostBegin)
+			return origin;
+		const char *afterBracket = hostEnd + 1;
+		if (afterBracket < authorityEnd) {
+			if (*afterBracket != ':')
+				return origin;
+			portBegin = afterBracket + 1;
+		}
+	} else {
+		for (const char *cursor = authority; cursor < authorityEnd; ++cursor) {
+			if (*cursor == ':') {
+				if (portBegin != nullptr)
+					return origin;
+				hostEnd = cursor;
+				portBegin = cursor + 1;
+			}
+		}
+	}
+	if (hostEnd == hostBegin)
+		return origin;
+
+	if (portBegin != nullptr) {
+		if (portBegin == authorityEnd)
+			return origin;
+		uint32_t port = 0;
+		for (const char *cursor = portBegin; cursor < authorityEnd; ++cursor) {
+			if (*cursor < '0' || *cursor > '9')
+				return origin;
+			const uint32_t digit = static_cast<uint32_t>(*cursor - '0');
+			if (port > 6553U || (port == 6553U && digit > 5U))
+				return origin;
+			port = (port * 10U) + digit;
+		}
+		if (port == 0)
+			return origin;
+		origin.port = static_cast<uint16_t>(port);
+	}
+
+	origin.host = hostBegin;
+	origin.hostSize = static_cast<size_t>(hostEnd - hostBegin);
+	origin.valid = true;
+	return origin;
+}
+
+inline bool linkSameOrigin(const LinkUrlOrigin &left, const LinkUrlOrigin &right) {
+	return left.valid && right.valid && left.https == right.https && left.port == right.port &&
+	       linkAsciiEqual(left.host, left.hostSize, right.host, right.hostSize);
+}
+
+inline LinkError
+linkPreserveOperationError(const LinkError &operationError, const LinkError &transportError) {
+	return operationError.code == LinkErrorCode::Ok ? transportError : operationError;
+}
 
 inline bool linkIsRedirectStatus(int status) {
 	return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
@@ -34,7 +146,8 @@ inline LinkRedirectDecision linkEvaluateRedirect(
     LinkMethod method,
     int status,
     const LinkHeaders &headers,
-    uint8_t redirectCount
+    uint8_t redirectCount,
+    const char *currentUrl
 ) {
 	LinkRedirectDecision decision;
 	if (!config.followRedirects || method != LinkMethod::Get || !linkIsRedirectStatus(status)) {
@@ -59,7 +172,27 @@ inline LinkRedirectDecision linkEvaluateRedirect(
 		return decision;
 	}
 
+	const LinkUrlOrigin currentOrigin = linkParseOrigin(currentUrl);
+	const LinkUrlOrigin redirectOrigin = linkParseOrigin(location);
+	if (!currentOrigin.valid || !redirectOrigin.valid) {
+		decision.action = LinkRedirectAction::Error;
+		decision.error = {LinkErrorCode::RedirectRejected, "redirect origin is invalid"};
+		return decision;
+	}
+	if (currentOrigin.https && !redirectOrigin.https && !config.allowHttpsToHttpRedirects) {
+		decision.action = LinkRedirectAction::Error;
+		decision.error = {LinkErrorCode::RedirectRejected, "https to http redirect rejected"};
+		return decision;
+	}
+	const bool sameOrigin = linkSameOrigin(currentOrigin, redirectOrigin);
+	if (!sameOrigin && !config.allowCrossOriginRedirects) {
+		decision.action = LinkRedirectAction::Error;
+		decision.error = {LinkErrorCode::RedirectRejected, "cross-origin redirect rejected"};
+		return decision;
+	}
+
 	decision.action = LinkRedirectAction::Follow;
+	decision.stripRequestHeaders = !sameOrigin;
 	return decision;
 }
 
@@ -336,7 +469,6 @@ LinkResult LinkClient<CallbackStorageSize>::deinitInternal(bool waitForever) {
 	}
 
 	markStopping();
-	cancelPendingRequests();
 	wakeWorkers();
 
 	LinkResult waitResult = waitForWorkers(waitForever);
@@ -446,25 +578,6 @@ void LinkClient<CallbackStorageSize>::releaseSlot(size_t slotIndex) {
 	}
 	_slots[slotIndex].reset();
 	_slotUsed[slotIndex] = false;
-}
-
-template <size_t CallbackStorageSize>
-void LinkClient<CallbackStorageSize>::cancelPendingRequests() {
-	while (true) {
-		size_t slotIndex = 0;
-		if (!popRequest(slotIndex)) {
-			break;
-		}
-		QueuedRequest request;
-		{
-			LinkLock lock(_mutex);
-			if (lock && _slots != nullptr && slotIndex < _config.queueSize) {
-				request = std::move(_slots[slotIndex]);
-				_slotUsed[slotIndex] = false;
-			}
-		}
-		invokeCancelled(request);
-	}
 }
 
 template <size_t CallbackStorageSize>
@@ -694,6 +807,15 @@ inline LinkError mapEspError(esp_err_t err, esp_http_client_handle_t client, con
 	return {LinkErrorCode::ReceiveFailed, esp_err_to_name(err)};
 }
 
+inline LinkError mapSetupError(esp_err_t err, const char *message) {
+	if (err == ESP_OK)
+		return {LinkErrorCode::Ok, "ok"};
+	if (err == ESP_ERR_NO_MEM) {
+		return {LinkErrorCode::AllocationFailed, "http request setup allocation failed"};
+	}
+	return {LinkErrorCode::InternalError, message};
+}
+
 } // namespace link_internal_http
 
 template <size_t CallbackStorageSize>
@@ -714,7 +836,7 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			        ? context->streamInfo.headers.add(event->header_key, event->header_value)
 			        : context->response->headers.add(event->header_key, event->header_value);
 			if (!result) {
-				context->headerFailed = true;
+				context->eventError = {result.code, result.message};
 				return ESP_FAIL;
 			}
 		}
@@ -724,7 +846,7 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			break;
 		}
 		if (context->owner->state() == LinkState::Stopping) {
-			context->cancelled = true;
+			context->eventError = {LinkErrorCode::Cancelled, "request cancelled"};
 			return ESP_FAIL;
 		}
 		if (context->request->responseMode == LinkResponseMode::Stream) {
@@ -738,7 +860,8 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 				        context->request->method,
 				        context->streamInfo.httpStatus,
 				        context->streamInfo.headers,
-				        context->redirectCount
+				        context->redirectCount,
+				        context->currentUrl
 				    );
 				context->suppressStreamCallbacks =
 				    redirect.action != link_internal::LinkRedirectAction::None;
@@ -758,7 +881,7 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			const LinkStreamAction action = context->request->onStreamChunk(chunk);
 			context->totalReceived = chunk.totalReceived;
 			if (action == LinkStreamAction::Cancel) {
-				context->cancelled = true;
+				context->eventError = {LinkErrorCode::Cancelled, "request cancelled"};
 				return ESP_FAIL;
 			}
 			break;
@@ -769,12 +892,15 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			const size_t currentSize = context->response->body.size();
 			if (chunkSize > context->owner->_config.maxResponseBodySize ||
 			    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
-				context->responseTooLarge = true;
+				context->eventError = {
+				    LinkErrorCode::ResponseTooLarge,
+				    "response body is too large"
+				};
 				return ESP_FAIL;
 			}
 			if (!context->response->body
 			         .append(static_cast<const uint8_t *>(event->data), chunkSize, true)) {
-				context->response->error = {
+				context->eventError = {
 				    LinkErrorCode::AllocationFailed,
 				    "response body allocation failed"
 				};
@@ -810,6 +936,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 	}
 
 	uint8_t redirects = 0;
+	bool includeRequestHeaders = true;
 	while (true) {
 		LinkResponse response;
 		response.headers.configureLimits(
@@ -823,6 +950,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 		context.owner = this;
 		context.request = &request;
 		context.response = &response;
+		context.currentUrl = currentUrl;
 		context.redirectCount = redirects;
 		context.streamInfo.headers.configureLimits(
 		    _config.maxHeaderCount,
@@ -863,38 +991,42 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 			return;
 		}
 
-		esp_http_client_set_method(client, link_internal_http::toEspMethod(request.method));
-		for (size_t i = 0; i < request.headers.size(); ++i) {
-			esp_http_client_set_header(
-			    client,
-			    request.headers.nameAt(i),
-			    request.headers.valueAt(i)
+		LinkError setupError = link_internal_http::mapSetupError(
+		    esp_http_client_set_method(client, link_internal_http::toEspMethod(request.method)),
+		    "http method setup failed"
+		);
+		for (size_t i = 0; includeRequestHeaders && setupError.code == LinkErrorCode::Ok &&
+		                   i < request.headers.size();
+		     ++i) {
+			const char *headerName = request.headers.nameAt(i);
+			setupError = link_internal_http::mapSetupError(
+			    esp_http_client_set_header(client, headerName, request.headers.valueAt(i)),
+			    "http header setup failed"
 			);
 		}
-		if (request.body.size() > 0) {
-			esp_http_client_set_post_field(
-			    client,
-			    reinterpret_cast<const char *>(request.body.data()),
-			    static_cast<int>(request.body.size())
+		if (setupError.code == LinkErrorCode::Ok && request.body.size() > 0) {
+			setupError = link_internal_http::mapSetupError(
+			    esp_http_client_set_post_field(
+			        client,
+			        reinterpret_cast<const char *>(request.body.data()),
+			        static_cast<int>(request.body.size())
+			    ),
+			    "http request body setup failed"
 			);
 		}
 
-		const esp_err_t err = esp_http_client_perform(client);
+		const esp_err_t err =
+		    setupError.code == LinkErrorCode::Ok ? esp_http_client_perform(client) : ESP_FAIL;
 		response.httpStatus = esp_http_client_get_status_code(client);
 		context.streamInfo.httpStatus = response.httpStatus;
 		context.streamInfo.contentLength = esp_http_client_get_content_length(client);
-		LinkError transportError = link_internal_http::mapEspError(err, client, currentUrl);
+		LinkError transportError = setupError.code == LinkErrorCode::Ok
+		                               ? link_internal_http::mapEspError(err, client, currentUrl)
+		                               : setupError;
 		esp_http_client_cleanup(client);
 
-		if (context.headerFailed) {
-			response.error = {LinkErrorCode::HeaderTooLarge, "response headers exceed limits"};
-		} else if (context.responseTooLarge) {
-			response.error = {LinkErrorCode::ResponseTooLarge, "response body is too large"};
-		} else if (context.cancelled) {
-			response.error = {LinkErrorCode::Cancelled, "request cancelled"};
-		} else {
-			response.error = transportError;
-		}
+		response.error =
+		    link_internal::linkPreserveOperationError(context.eventError, transportError);
 
 		if (response.error.code == LinkErrorCode::Ok) {
 			const LinkHeaders &responseHeaders = request.responseMode == LinkResponseMode::Stream
@@ -906,7 +1038,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 			        request.method,
 			        response.httpStatus,
 			        responseHeaders,
-			        redirects
+			        redirects,
+			        currentUrl
 			    );
 			if (redirect.action == link_internal::LinkRedirectAction::Error) {
 				response.error = redirect.error;
@@ -919,6 +1052,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(QueuedRequest &request)
 					    "redirect url allocation failed"
 					};
 				} else {
+					if (redirect.stripRequestHeaders)
+						includeRequestHeaders = false;
 					link_memory::release(currentUrl);
 					currentUrl = nextUrl;
 					redirects++;

@@ -38,4 +38,6 @@ Private methods can be bound when binding happens from inside the class.
 
 Callbacks run inside the Link worker task that handled the request. If `maxConcurrentRequests > 1`, multiple callbacks may run at the same time.
 
+Queued cancellation callbacks also run inside Link worker tasks during shutdown. Do not call `deinit()` or destroy the `Link` instance from a Link callback: both shutdown paths wait for workers, including the worker currently executing that callback.
+
 Do not hold long blocking work in Link callbacks. Forward large processing to another task when needed.
