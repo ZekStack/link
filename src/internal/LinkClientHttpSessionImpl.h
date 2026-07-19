@@ -285,5 +285,4 @@ void LinkClient<CallbackStorageSize>::cleanupPersistentHttpClient(
 	}
 }
 
-
 #endif

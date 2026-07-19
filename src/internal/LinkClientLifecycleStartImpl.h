@@ -263,4 +263,3 @@ LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
 	}
 	return LinkResult::ok();
 }
-

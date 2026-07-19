@@ -245,4 +245,3 @@ inline bool linkWorkerSignalCapacity(const LinkConfig &config, UBaseType_t &out)
 }
 
 } // namespace link_internal
-

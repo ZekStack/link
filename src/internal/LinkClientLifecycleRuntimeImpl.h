@@ -215,9 +215,7 @@ void LinkClient<CallbackStorageSize>::recordRequestCompleted() {
 }
 
 template <size_t CallbackStorageSize>
-void LinkClient<CallbackStorageSize>::processRequest(
-    WorkerRecord &worker, QueuedRequest &request
-) {
+void LinkClient<CallbackStorageSize>::processRequest(WorkerRecord &worker, QueuedRequest &request) {
 	LinkState currentState = state();
 	if (currentState == LinkState::Stopping) {
 		invokeCancelled(request);
@@ -235,4 +233,3 @@ LinkResult LinkClient<CallbackStorageSize>::addJsonAccept(LinkHeaders &headers) 
 	}
 	return LinkResult::ok();
 }
-

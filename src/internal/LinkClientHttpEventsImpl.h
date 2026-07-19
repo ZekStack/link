@@ -1,10 +1,7 @@
 #if defined(ESP32)
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::preparePersistentHttpClient(
-    WorkerRecord &worker,
-    const char *url,
-    uint32_t timeoutMs,
-    esp_http_client_handle_t &client
+    WorkerRecord &worker, const char *url, uint32_t timeoutMs, esp_http_client_handle_t &client
 ) {
 	WorkerHttpSession &session = worker.http;
 	const link_internal::LinkUrlOrigin origin = link_internal::linkParseOrigin(url);
@@ -112,10 +109,12 @@ bool LinkClient<CallbackStorageSize>::scrubHttpClientRequest(
 		const size_t headerNameSize = std::strlen(headerName);
 		for (size_t previousIndex = 0; previousIndex < i; ++previousIndex) {
 			const char *previousName = headers.nameAt(previousIndex);
-			if (previousName != nullptr &&
-			    link_internal::linkAsciiEqual(
-			        headerName, headerNameSize, previousName, std::strlen(previousName)
-			    )) {
+			if (previousName != nullptr && link_internal::linkAsciiEqual(
+			                                   headerName,
+			                                   headerNameSize,
+			                                   previousName,
+			                                   std::strlen(previousName)
+			                               )) {
 				alreadyDeleted = true;
 				break;
 			}
@@ -240,6 +239,5 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 	}
 	return ESP_OK;
 }
-
 
 #endif

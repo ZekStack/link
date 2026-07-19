@@ -498,7 +498,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return headerResult;
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
-			return LinkResult::error(LinkErrorCode::CallbackTooLarge,
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
 			    "response callback is too large"
 			);
 		}
@@ -514,7 +515,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	template <typename Callback>
 	LinkResult post(
 	    const char *url, const LinkHeaders &headers, const LinkBodyView &body, Callback &&callback
- ) {
+	) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -566,7 +567,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	template <typename Callback>
 	LinkResult postJson(
 	    const char *url, const LinkHeaders &headers, const JsonDocument &json, Callback &&callback
- ) {
+	) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -581,8 +582,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return acceptResult;
 		}
 		if (!request.headers.has("Content-Type")) {
-			LinkResult contentTypeResult =
-			    request.headers.set("Content-Type", "application/json");
+			LinkResult contentTypeResult = request.headers.set("Content-Type", "application/json");
 			if (!contentTypeResult) {
 				return contentTypeResult;
 			}
@@ -694,14 +694,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 	    const char *currentUrl,
 	    uint8_t redirectCount
 	);
-	esp_http_client_handle_t createHttpClient(
-	    HttpEventContext &context, const char *url, uint32_t timeoutMs
-	);
+	esp_http_client_handle_t
+	createHttpClient(HttpEventContext &context, const char *url, uint32_t timeoutMs);
 	LinkResult preparePersistentHttpClient(
-	    WorkerRecord &worker,
-	    const char *url,
-	    uint32_t timeoutMs,
-	    esp_http_client_handle_t &client
+	    WorkerRecord &worker, const char *url, uint32_t timeoutMs, esp_http_client_handle_t &client
 	);
 	void cleanupPersistentHttpClient(WorkerRecord &worker, HttpSessionCleanupReason reason);
 	void cleanupHttpClient(esp_http_client_handle_t client);
