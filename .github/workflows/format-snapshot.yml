@@ -2,14 +2,19 @@ name: Format Snapshot
 
 on:
   pull_request:
-  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   format:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout pull request branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format
@@ -19,12 +24,14 @@ jobs:
           find src tests examples -type f \( -name '*.h' -o -name '*.cpp' -o -name '*.ino' \) -print0 \
             | xargs -0 clang-format -i
 
-      - name: Package formatted sources
-        run: tar -czf /tmp/link-formatted-sources.tar.gz src tests examples
-
-      - name: Upload formatted sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: link-formatted-sources
-          path: /tmp/link-formatted-sources.tar.gz
-          retention-days: 1
+      - name: Commit formatting
+        run: |
+          if git diff --quiet; then
+            echo "Formatting already clean"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests examples
+          git commit -m "Apply clang-format"
+          git push
