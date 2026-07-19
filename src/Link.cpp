@@ -250,7 +250,8 @@ LinkResult LinkHeaders::ensureStorage() {
 	_entries = new (std::nothrow) Entry[_maxHeaderCount];
 	if (_entries == nullptr) {
 		return LinkResult::error(
-		    LinkErrorCode::AllocationFailed, "header storage allocation failed"
+		    LinkErrorCode::AllocationFailed,
+		    "header storage allocation failed"
 		);
 	}
 	_capacity = _maxHeaderCount;
@@ -493,7 +494,8 @@ LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, 
 			if (written != size) {
 				out.clear();
 				return LinkResult::error(
-				    LinkErrorCode::JsonSerializeFailed, "json serialization failed"
+				    LinkErrorCode::JsonSerializeFailed,
+				    "json serialization failed"
 				);
 			}
 		}
