@@ -1,5 +1,9 @@
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::deinitInternal(bool waitForever) {
+	LinkLock lifecycleLock(_lifecycleMutex);
+	if (!lifecycleLock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "lifecycle mutex lock failed");
+	}
 	{
 		LinkLock lock(_mutex);
 		if (!lock) {
@@ -17,7 +21,6 @@ LinkResult LinkClient<CallbackStorageSize>::deinitInternal(bool waitForever) {
 	if (!waitResult) {
 		return waitResult;
 	}
-
 	return freeRuntimeStorage();
 }
 
@@ -42,6 +45,11 @@ LinkDiagnostics LinkClient<CallbackStorageSize>::diagnostics() const {
 
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
+	LinkLock lifecycleLock(_lifecycleMutex);
+	if (!lifecycleLock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "lifecycle mutex lock failed");
+	}
+
 	QueuedRequest queued;
 	LinkConfig configSnapshot;
 	uint32_t requestId = 0;
@@ -65,45 +73,51 @@ LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
 		return copyResult;
 	}
 
-	{
-		LinkLock lock(_mutex);
-		if (!lock) {
-			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-		}
-		if (_state == LinkState::Stopping) {
-			return LinkResult::error(LinkErrorCode::Stopping, "link is stopping");
-		}
-		if (_state != LinkState::Running) {
-			return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
-		}
-		if (_queueCount >= _config.queueSize) {
-			return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
-		}
-
-		size_t slotIndex = _config.queueSize;
-		for (size_t i = 0; i < _config.queueSize; ++i) {
-			if (!_slotUsed[i]) {
-				slotIndex = i;
-				break;
-			}
-		}
-		if (slotIndex == _config.queueSize) {
-			return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
-		}
-
-		_slots[slotIndex] = std::move(queued);
-		_slotUsed[slotIndex] = true;
-		_queue[_queueTail] = slotIndex;
-		_queueTail = (_queueTail + 1) % _config.queueSize;
-		_queueCount++;
-		_diagnostics.requestsSubmitted++;
+	LinkLock lock(_mutex);
+	if (!lock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 	}
+	if (_state == LinkState::Stopping) {
+		return LinkResult::error(LinkErrorCode::Stopping, "link is stopping");
+	}
+	if (_state != LinkState::Running) {
+		return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
+	}
+	if (_slots == nullptr || _slotUsed == nullptr || _queue == nullptr) {
+		return LinkResult::error(LinkErrorCode::InternalError, "link runtime storage is missing");
+	}
+	if (_queueCount >= _config.queueSize) {
+		return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
+	}
+
+	size_t slotIndex = _config.queueSize;
+	for (size_t i = 0; i < _config.queueSize; ++i) {
+		if (!_slotUsed[i]) {
+			slotIndex = i;
+			break;
+		}
+	}
+	if (slotIndex == _config.queueSize) {
+		return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
+	}
+
+	_slots[slotIndex] = std::move(queued);
+	_slotUsed[slotIndex] = true;
+	_queue[_queueTail] = slotIndex;
+	_queueTail = (_queueTail + 1) % _config.queueSize;
+	_queueCount++;
 
 #if defined(ESP32)
-	if (_items != nullptr) {
-		xSemaphoreGive(_items);
+	if (_items == nullptr || xSemaphoreGive(_items) != pdTRUE) {
+		_queueTail = (_queueTail + _config.queueSize - 1) % _config.queueSize;
+		_queueCount--;
+		_slots[slotIndex].reset();
+		_slotUsed[slotIndex] = false;
+		return LinkResult::error(LinkErrorCode::InternalError, "worker signal failed");
 	}
 #endif
+
+	_diagnostics.requestsSubmitted++;
 	return LinkResult::ok();
 }
 
@@ -174,7 +188,7 @@ void LinkClient<CallbackStorageSize>::workerLoop(WorkerRecord *worker) {
 			}
 		}
 		if (_items != nullptr) {
-			xSemaphoreTake(_items, portMAX_DELAY);
+			(void)xSemaphoreTake(_items, portMAX_DELAY);
 		}
 		{
 			LinkLock lock(_mutex);
