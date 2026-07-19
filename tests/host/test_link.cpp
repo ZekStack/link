@@ -1,8 +1,10 @@
 #include <Link.h>
 
 #include <cassert>
+#include <climits>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 
 namespace {
 
@@ -10,6 +12,7 @@ void testResultAndStateStrings() {
 	LinkResult ok = LinkResult::ok();
 	assert(ok);
 	assert(std::strcmp(linkErrorCodeToString(LinkErrorCode::Stopping), "Stopping") == 0);
+	assert(std::strcmp(linkErrorCodeToString(LinkErrorCode::InvalidTimeout), "InvalidTimeout") == 0);
 	assert(
 	    std::strcmp(linkErrorCodeToString(LinkErrorCode::RedirectRejected), "RedirectRejected") == 0
 	);
@@ -84,6 +87,48 @@ void testBody() {
 	);
 }
 
+void testMoveOnlyResponseOwnership() {
+	static_assert(!std::is_copy_constructible_v<LinkOwnedBuffer>);
+	static_assert(!std::is_copy_assignable_v<LinkOwnedBuffer>);
+	static_assert(!std::is_copy_constructible_v<LinkHeaders>);
+	static_assert(!std::is_copy_assignable_v<LinkHeaders>);
+	static_assert(!std::is_copy_constructible_v<LinkBody>);
+	static_assert(!std::is_copy_assignable_v<LinkBody>);
+	static_assert(!std::is_copy_constructible_v<LinkResponse>);
+	static_assert(!std::is_copy_assignable_v<LinkResponse>);
+	static_assert(std::is_nothrow_move_constructible_v<LinkResponse>);
+	static_assert(std::is_nothrow_move_assignable_v<LinkResponse>);
+
+	LinkResponse source;
+	source.error = {LinkErrorCode::Ok, "ok"};
+	source.httpStatus = 201;
+	assert(source.headers.add("X-Test", "source"));
+	assert(source.body.assignText("payload", 7));
+
+	LinkResponse destination;
+	destination.error = {LinkErrorCode::ReceiveFailed, "unchanged"};
+	destination.httpStatus = 503;
+	assert(destination.headers.add("X-Old", "keep"));
+	assert(destination.body.assignText("old", 3));
+
+#if !defined(ESP32)
+	link_memory::testFailAllocationsAfter(0);
+	LinkResult failed = destination.copyFrom(source);
+	link_memory::testResetAllocationFailures();
+	assert(failed.code == LinkErrorCode::AllocationFailed);
+	assert(destination.error.code == LinkErrorCode::ReceiveFailed);
+	assert(destination.httpStatus == 503);
+	assert(std::strcmp(destination.headers.get("X-Old"), "keep") == 0);
+	assert(std::strcmp(destination.body.c_str(), "old") == 0);
+#endif
+
+	assert(destination.copyFrom(source));
+	assert(destination.error.code == LinkErrorCode::Ok);
+	assert(destination.httpStatus == 201);
+	assert(std::strcmp(destination.headers.get("X-Test"), "source") == 0);
+	assert(std::strcmp(destination.body.c_str(), "payload") == 0);
+}
+
 void testWorkerSignalCapacity() {
 	LinkConfig config;
 	config.queueSize = 3;
@@ -92,8 +137,6 @@ void testWorkerSignalCapacity() {
 	assert(link_internal::linkWorkerSignalCapacity(config, capacity));
 	assert(capacity == 6);
 
-	// A full queue consumes all request permits. Shutdown must still be able to add one
-	// independent permit per worker, including when workers race for the final request.
 	UBaseType_t permits = static_cast<UBaseType_t>(config.queueSize);
 	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
 		assert(permits < capacity);
@@ -128,8 +171,7 @@ void testOwnedBufferAppend() {
 void testOperationErrorsTakePrecedence() {
 	const LinkError transportError = {LinkErrorCode::ReceiveFailed, "transport failed"};
 	const LinkError allocationError = {
-	    LinkErrorCode::AllocationFailed,
-	    "response body allocation failed"
+	    LinkErrorCode::AllocationFailed, "response body allocation failed"
 	};
 	const LinkError selected =
 	    link_internal::linkPreserveOperationError(allocationError, transportError);
@@ -152,12 +194,7 @@ void testRedirectDecisions() {
 	const int followedStatuses[] = {301, 302, 303, 307, 308};
 	for (int status : followedStatuses) {
 		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config,
-		    LinkMethod::Get,
-		    status,
-		    headers,
-		    0,
-		    currentUrl
+		    config, LinkMethod::Get, status, headers, 0, currentUrl
 		);
 		assert(decision.action == link_internal::LinkRedirectAction::Follow);
 		assert(!decision.stripRequestHeaders);
@@ -167,36 +204,26 @@ void testRedirectDecisions() {
 	const int finalStatuses[] = {200, 300, 304, 305, 306, 404};
 	for (int status : finalStatuses) {
 		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config,
-		    LinkMethod::Get,
-		    status,
-		    headers,
-		    0,
-		    currentUrl
+		    config, LinkMethod::Get, status, headers, 0, currentUrl
 		);
 		assert(decision.action == link_internal::LinkRedirectAction::None);
 	}
-
 	assert(
 	    link_internal::linkEvaluateRedirect(config, LinkMethod::Post, 302, headers, 0, currentUrl)
 	        .action == link_internal::LinkRedirectAction::None
 	);
+
 	config.followRedirects = false;
 	assert(
 	    link_internal::linkEvaluateRedirect(config, LinkMethod::Get, 302, headers, 0, currentUrl)
 	        .action == link_internal::LinkRedirectAction::None
 	);
-
 	config.followRedirects = true;
+
 	LinkHeaders missingLocation;
 	assert(
 	    link_internal::linkEvaluateRedirect(
-	        config,
-	        LinkMethod::Get,
-	        302,
-	        missingLocation,
-	        0,
-	        currentUrl
+	        config, LinkMethod::Get, 302, missingLocation, 0, currentUrl
 	    )
 	        .action == link_internal::LinkRedirectAction::None
 	);
@@ -204,12 +231,7 @@ void testRedirectDecisions() {
 	assert(relativeLocation.add("Location", "/final"));
 	assert(
 	    link_internal::linkEvaluateRedirect(
-	        config,
-	        LinkMethod::Get,
-	        302,
-	        relativeLocation,
-	        0,
-	        currentUrl
+	        config, LinkMethod::Get, 302, relativeLocation, 0, currentUrl
 	    )
 	        .action == link_internal::LinkRedirectAction::None
 	);
@@ -235,12 +257,7 @@ void testRedirectDecisions() {
 	assert(crossOrigin.add("Location", "https://api.example.com/final"));
 	const link_internal::LinkRedirectDecision rejectedCrossOrigin =
 	    link_internal::linkEvaluateRedirect(
-	        config,
-	        LinkMethod::Get,
-	        302,
-	        crossOrigin,
-	        0,
-	        currentUrl
+	        config, LinkMethod::Get, 302, crossOrigin, 0, currentUrl
 	    );
 	assert(rejectedCrossOrigin.action == link_internal::LinkRedirectAction::Error);
 	assert(rejectedCrossOrigin.error.code == LinkErrorCode::RedirectRejected);
@@ -248,12 +265,7 @@ void testRedirectDecisions() {
 	config.allowCrossOriginRedirects = true;
 	const link_internal::LinkRedirectDecision allowedCrossOrigin =
 	    link_internal::linkEvaluateRedirect(
-	        config,
-	        LinkMethod::Get,
-	        302,
-	        crossOrigin,
-	        0,
-	        currentUrl
+	        config, LinkMethod::Get, 302, crossOrigin, 0, currentUrl
 	    );
 	assert(allowedCrossOrigin.action == link_internal::LinkRedirectAction::Follow);
 	assert(allowedCrossOrigin.stripRequestHeaders);
@@ -274,12 +286,7 @@ void testRedirectDecisions() {
 	LinkHeaders explicitDefaultPort;
 	assert(explicitDefaultPort.add("Location", "https://EXAMPLE.com:443/final"));
 	const link_internal::LinkRedirectDecision sameDefaultPort = link_internal::linkEvaluateRedirect(
-	    config,
-	    LinkMethod::Get,
-	    302,
-	    explicitDefaultPort,
-	    0,
-	    currentUrl
+	    config, LinkMethod::Get, 302, explicitDefaultPort, 0, currentUrl
 	);
 	assert(sameDefaultPort.action == link_internal::LinkRedirectAction::Follow);
 	assert(!sameDefaultPort.stripRequestHeaders);
@@ -287,12 +294,7 @@ void testRedirectDecisions() {
 	LinkHeaders differentPort;
 	assert(differentPort.add("Location", "https://example.com:444/final"));
 	const link_internal::LinkRedirectDecision changedPort = link_internal::linkEvaluateRedirect(
-	    config,
-	    LinkMethod::Get,
-	    302,
-	    differentPort,
-	    0,
-	    currentUrl
+	    config, LinkMethod::Get, 302, differentPort, 0, currentUrl
 	);
 	assert(changedPort.action == link_internal::LinkRedirectAction::Follow);
 	assert(changedPort.stripRequestHeaders);
@@ -301,12 +303,7 @@ void testRedirectDecisions() {
 	assert(invalidPort.add("Location", "https://example.com:999999999999999999999/final"));
 	const link_internal::LinkRedirectDecision rejectedInvalidPort =
 	    link_internal::linkEvaluateRedirect(
-	        config,
-	        LinkMethod::Get,
-	        302,
-	        invalidPort,
-	        0,
-	        currentUrl
+	        config, LinkMethod::Get, 302, invalidPort, 0, currentUrl
 	    );
 	assert(rejectedInvalidPort.action == link_internal::LinkRedirectAction::Error);
 	assert(rejectedInvalidPort.error.code == LinkErrorCode::RedirectRejected);
@@ -332,7 +329,6 @@ void testCallbacks() {
 			called++;
 		}
 	};
-
 	Handler handler;
 	assert(callback.assign(
 	    LinkCallback<void(const LinkResponse &), 64>::bind(&handler, &Handler::handle)
@@ -355,25 +351,44 @@ void testLifecycleAndQueueLimits() {
 	LinkConfig config;
 	config.queueSize = 1;
 	config.maxConcurrentRequests = 1;
-	assert(link.init(config));
-	assert(link.isInitialized());
-
-	LinkResult first = link.get("https://example.com", [](const LinkResponse &) {});
-	assert(first);
-	LinkResult full = link.get("https://example.com/again", [](const LinkResponse &) {});
-	assert(full.code == LinkErrorCode::QueueFull);
-	assert(link.deinit());
-	assert(!link.isInitialized());
+	for (size_t round = 0; round < 20; ++round) {
+		assert(link.init(config));
+		assert(link.isInitialized());
+		LinkResult first = link.get("https://example.com", [](const LinkResponse &) {});
+		assert(first);
+		LinkResult full = link.get("https://example.com/again", [](const LinkResponse &) {});
+		assert(full.code == LinkErrorCode::QueueFull);
+		assert(link.deinit());
+		assert(!link.isInitialized());
+		assert(link.deinit());
+	}
 }
 
-void testInvalidQueueConcurrencyConfig() {
+void testInvalidConfigBounds() {
 	Link link;
 	LinkConfig config;
 	config.queueSize = 1;
+	config.maxConcurrentRequests = 1;
+
+	config.defaultTimeoutMs = static_cast<uint32_t>(INT_MAX) + 1U;
+	assert(link.init(config).code == LinkErrorCode::InvalidConfig);
+	config = LinkConfig{};
+	config.queueSize = 1;
+	config.maxConcurrentRequests = 1;
+	if (std::numeric_limits<size_t>::max() > static_cast<size_t>(INT_MAX)) {
+		config.maxRequestBodySize = static_cast<size_t>(INT_MAX) + 1U;
+		assert(link.init(config).code == LinkErrorCode::InvalidConfig);
+		config = LinkConfig{};
+		config.queueSize = 1;
+		config.maxConcurrentRequests = 1;
+		config.streamChunkSize = static_cast<size_t>(INT_MAX) + 1U;
+		assert(link.init(config).code == LinkErrorCode::InvalidConfig);
+	}
+
+	config = LinkConfig{};
+	config.queueSize = 1;
 	config.maxConcurrentRequests = 2;
-	LinkResult result = link.init(config);
-	assert(result.code == LinkErrorCode::InvalidConfig);
-	assert(!link.isInitialized());
+	assert(link.init(config).code == LinkErrorCode::InvalidConfig);
 }
 
 void testRequestValidation() {
@@ -388,6 +403,12 @@ void testRequestValidation() {
 	    link.get("https://example.com/too-long", [](const LinkResponse &) {}).code ==
 	    LinkErrorCode::UrlTooLarge
 	);
+
+	LinkRequest request;
+	request.url = "https://x.io";
+	request.timeoutMs = static_cast<uint32_t>(INT_MAX) + 1U;
+	assert(request.onResponse.assign([](const LinkResponse &) {}));
+	assert(link.fetch(request).code == LinkErrorCode::InvalidTimeout);
 	assert(link.deinit());
 }
 
@@ -397,13 +418,14 @@ int main() {
 	testResultAndStateStrings();
 	testHeaders();
 	testBody();
+	testMoveOnlyResponseOwnership();
 	testWorkerSignalCapacity();
 	testOwnedBufferAppend();
 	testOperationErrorsTakePrecedence();
 	testRedirectDecisions();
 	testCallbacks();
 	testLifecycleAndQueueLimits();
-	testInvalidQueueConcurrencyConfig();
+	testInvalidConfigBounds();
 	testRequestValidation();
 	return 0;
 }
