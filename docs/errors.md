@@ -11,9 +11,11 @@ Common submission errors:
 | `QueueFull` | The request queue has no free slot. |
 | `InvalidUrl` | URL is missing or not HTTP/HTTPS. |
 | `UrlTooLarge` | URL exceeds `maxUrlSize`. |
-| `RequestTooLarge` | Request body exceeds `maxRequestBodySize`. |
+| `InvalidTimeout` | An explicit request timeout is zero after resolution or exceeds the signed ESP-IDF timeout range. |
+| `RequestTooLarge` | Request body exceeds `maxRequestBodySize` or another request-size boundary. |
 | `CallbackTooLarge` | Callback does not fit inline storage. |
-| `InvalidConfig` | Configuration is internally inconsistent, such as `queueSize < maxConcurrentRequests`. |
+| `InvalidConfig` | Configuration is internally inconsistent or cannot be represented by the ESP-IDF API, such as `queueSize < maxConcurrentRequests`, `defaultTimeoutMs > INT_MAX`, or `streamChunkSize > INT_MAX`. |
+| `InternalError` | Link could not preserve an internal invariant, such as publishing a worker signal after queue insertion. A failed submission is rolled back and is not accepted. |
 
 Common response errors:
 
@@ -24,10 +26,10 @@ Common response errors:
 | `TlsFailed` | Verified HTTPS could not be established. |
 | `SendFailed` | ESP reported request write failure. |
 | `ReceiveFailed` | ESP reported response read, header fetch, closed connection, incomplete data, or another unmapped transport failure. |
-| `ResponseTooLarge` | Buffered response exceeded `maxResponseBodySize`. |
+| `ResponseTooLarge` | A final buffered response exceeded `maxResponseBodySize`. Intermediate bodies for redirects that Link will follow are discarded. |
 | `HeaderTooLarge` | Response headers exceeded configured limits. |
 | `TooManyHeaders` | A response supplied more headers than configured. |
-| `AllocationFailed` | Request setup or response storage allocation failed. |
+| `AllocationFailed` | Request setup, explicit response duplication, or response storage allocation failed. |
 | `RedirectRejected` | A redirect violated the cross-origin or HTTPS downgrade policy. |
 | `RedirectLimitReached` | A buffered or streaming GET exceeded `maxRedirects`. |
 | `JsonParseFailed` | JSON parsing failed or exceeded JSON limits. |

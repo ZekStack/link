@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <new>
 
 #if defined(ESP32)
@@ -11,6 +12,21 @@
 #endif
 
 namespace link_memory {
+
+#if !defined(ESP32)
+inline size_t &testAllocationBudget() {
+	static size_t budget = std::numeric_limits<size_t>::max();
+	return budget;
+}
+
+inline void testFailAllocationsAfter(size_t successfulAllocations) {
+	testAllocationBudget() = successfulAllocations;
+}
+
+inline void testResetAllocationFailures() {
+	testAllocationBudget() = std::numeric_limits<size_t>::max();
+}
+#endif
 
 inline void *allocate(size_t bytes, bool preferPsram = true) {
 	if (bytes == 0) {
@@ -29,6 +45,15 @@ inline void *allocate(size_t bytes, bool preferPsram = true) {
 	return memory;
 #else
 	(void)preferPsram;
+#if !defined(ESP32)
+	size_t &budget = testAllocationBudget();
+	if (budget == 0) {
+		return nullptr;
+	}
+	if (budget != std::numeric_limits<size_t>::max()) {
+		budget--;
+	}
+#endif
 	return ::operator new(bytes, std::nothrow);
 #endif
 }
@@ -66,17 +91,8 @@ class LinkOwnedBuffer {
 		clear();
 	}
 
-	LinkOwnedBuffer(const LinkOwnedBuffer &other) {
-		copyFrom(other);
-	}
-
-	LinkOwnedBuffer &operator=(const LinkOwnedBuffer &other) {
-		if (this != &other) {
-			clear();
-			copyFrom(other);
-		}
-		return *this;
-	}
+	LinkOwnedBuffer(const LinkOwnedBuffer &) = delete;
+	LinkOwnedBuffer &operator=(const LinkOwnedBuffer &) = delete;
 
 	LinkOwnedBuffer(LinkOwnedBuffer &&other) noexcept {
 		moveFrom(other);

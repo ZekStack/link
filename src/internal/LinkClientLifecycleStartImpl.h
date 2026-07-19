@@ -26,7 +26,26 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 	    config.streamChunkSize == 0) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "memory limits must be nonzero");
 	}
-	if (config.maxHeaderNameSize + config.maxHeaderValueSize > config.maxTotalHeaderSize) {
+	if (config.defaultTimeoutMs > static_cast<uint32_t>(INT_MAX)) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "default timeout exceeds ESP-IDF limit"
+		);
+	}
+	if (config.maxRequestBodySize > static_cast<size_t>(INT_MAX)) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "request body limit exceeds ESP-IDF limit"
+		);
+	}
+	if (config.streamChunkSize > static_cast<size_t>(INT_MAX)) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "stream chunk size exceeds ESP-IDF limit"
+		);
+	}
+	if (config.maxHeaderNameSize > config.maxTotalHeaderSize ||
+	    config.maxHeaderValueSize > config.maxTotalHeaderSize - config.maxHeaderNameSize) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "header total limit is too small");
 	}
 	UBaseType_t signalCapacity = 0;
@@ -60,6 +79,24 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			    "link is already initialized"
 			);
 		}
+	}
+
+	LinkLock lifecycleLock(_lifecycleMutex);
+	if (!lifecycleLock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "lifecycle mutex lock failed");
+	}
+
+	{
+		LinkLock lock(_mutex);
+		if (!lock) {
+			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+		}
+		if (_state != LinkState::Uninitialized) {
+			return LinkResult::error(
+			    LinkErrorCode::AlreadyInitialized,
+			    "link is already initialized"
+			);
+		}
 		LinkResult configResult = validateConfig(config);
 		if (!configResult) {
 			return configResult;
@@ -81,6 +118,7 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			_slotUsed = nullptr;
 			_queue = nullptr;
 			_workers = nullptr;
+			_config = LinkConfig{};
 			_state = LinkState::Uninitialized;
 			return LinkResult::error(
 			    LinkErrorCode::AllocationFailed,
@@ -107,25 +145,34 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		    "worker signal capacity is too large"
 		);
 	}
-	_items = xSemaphoreCreateCounting(signalCapacity, 0);
-	if (_items == nullptr) {
-		delete[] _slots;
-		delete[] _slotUsed;
-		delete[] _queue;
-		delete[] _workers;
-		_slots = nullptr;
-		_slotUsed = nullptr;
-		_queue = nullptr;
-		_workers = nullptr;
-		_state = LinkState::Uninitialized;
+	SemaphoreHandle_t items = xSemaphoreCreateCounting(signalCapacity, 0);
+	if (items == nullptr) {
+		forceDeinitBlocking();
 		return LinkResult::error(LinkErrorCode::AllocationFailed, "link queue semaphore failed");
+	}
+	{
+		LinkLock lock(_mutex);
+		if (!lock) {
+			vSemaphoreDelete(items);
+			forceDeinitBlocking();
+			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+		}
+		_items = items;
 	}
 
 	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
-		_workers[i].owner = this;
-		_workers[i].index = i;
-		_workers[i].active = true;
-		_workers[i].http.eventContext.owner = this;
+		{
+			LinkLock lock(_mutex);
+			if (!lock) {
+				forceDeinitBlocking();
+				return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+			}
+			_workers[i].owner = this;
+			_workers[i].index = i;
+			_workers[i].active = true;
+			_workers[i].http.eventContext.owner = this;
+		}
+
 		char name[16]{};
 		snprintf(name, sizeof(name), "link-%u", static_cast<unsigned>(i));
 		const BaseType_t created = link_task_support::createTask(
@@ -140,10 +187,10 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		    _workers[i].createdWithCaps
 		);
 		if (created != pdPASS) {
-			_workers[i].active = false;
 			{
 				LinkLock lock(_mutex);
 				if (lock) {
+					_workers[i].active = false;
 					_state = LinkState::Stopping;
 				}
 			}
@@ -161,6 +208,10 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		if (!lock) {
 			forceDeinitBlocking();
 			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+		}
+		if (_state != LinkState::Starting) {
+			forceDeinitBlocking();
+			return LinkResult::error(LinkErrorCode::InternalError, "link startup state changed");
 		}
 		_state = LinkState::Running;
 	}
@@ -190,7 +241,7 @@ template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::wake
 	}
 	_stopWakeIssued = true;
 	for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
-		xSemaphoreGive(_items);
+		(void)xSemaphoreGive(_items);
 	}
 #endif
 }
@@ -232,34 +283,32 @@ LinkResult LinkClient<CallbackStorageSize>::waitForWorkers(bool waitForever) {
 
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
-	{
-		LinkLock lock(_mutex);
-		if (!lock) {
-			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-		}
-		if (_state == LinkState::Uninitialized) {
-			return LinkResult::ok();
-		}
-#if defined(ESP32)
-		if (_items != nullptr) {
-			vSemaphoreDelete(_items);
-			_items = nullptr;
-		}
-#endif
-		delete[] _slots;
-		delete[] _slotUsed;
-		delete[] _queue;
-		delete[] _workers;
-		_slots = nullptr;
-		_slotUsed = nullptr;
-		_queue = nullptr;
-		_workers = nullptr;
-		_queueHead = 0;
-		_queueTail = 0;
-		_queueCount = 0;
-		_stopWakeIssued = false;
-		_config = LinkConfig{};
-		_state = LinkState::Uninitialized;
+	LinkLock lock(_mutex);
+	if (!lock) {
+		return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 	}
+	if (_state == LinkState::Uninitialized) {
+		return LinkResult::ok();
+	}
+#if defined(ESP32)
+	if (_items != nullptr) {
+		vSemaphoreDelete(_items);
+		_items = nullptr;
+	}
+#endif
+	delete[] _slots;
+	delete[] _slotUsed;
+	delete[] _queue;
+	delete[] _workers;
+	_slots = nullptr;
+	_slotUsed = nullptr;
+	_queue = nullptr;
+	_workers = nullptr;
+	_queueHead = 0;
+	_queueTail = 0;
+	_queueCount = 0;
+	_stopWakeIssued = false;
+	_config = LinkConfig{};
+	_state = LinkState::Uninitialized;
 	return LinkResult::ok();
 }
