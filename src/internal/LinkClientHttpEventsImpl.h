@@ -167,7 +167,7 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			}
 		}
 		break;
-	case HTTP_EVENT_ON_DATA:
+	case HTTP_EVENT_ON_DATA: {
 		if (event->data == nullptr || event->data_len <= 0) {
 			break;
 		}
@@ -175,27 +175,35 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			context->eventError = {LinkErrorCode::Cancelled, "request cancelled"};
 			return ESP_FAIL;
 		}
-		if (context->request->responseMode == LinkResponseMode::Stream) {
-			if (!context->streamDispositionSet) {
-				context->streamInfo.httpStatus = esp_http_client_get_status_code(event->client);
+
+		const bool streaming = context->request->responseMode == LinkResponseMode::Stream;
+		if (!context->streamDispositionSet) {
+			const int httpStatus = esp_http_client_get_status_code(event->client);
+			if (streaming) {
+				context->streamInfo.httpStatus = httpStatus;
 				context->streamInfo.contentLength =
 				    esp_http_client_get_content_length(event->client);
-				const link_internal::LinkRedirectDecision redirect =
-				    link_internal::linkEvaluateRedirect(
-				        context->owner->_config,
-				        context->request->method,
-				        context->streamInfo.httpStatus,
-				        context->streamInfo.headers,
-				        context->redirectCount,
-				        context->currentUrl
-				    );
-				context->suppressStreamCallbacks =
-				    redirect.action != link_internal::LinkRedirectAction::None;
-				context->streamDispositionSet = true;
 			}
-			if (context->suppressStreamCallbacks) {
-				break;
-			}
+			const LinkHeaders &headers =
+			    streaming ? context->streamInfo.headers : context->response->headers;
+			const link_internal::LinkRedirectDecision redirect =
+			    link_internal::linkEvaluateRedirect(
+			        context->owner->_config,
+			        context->request->method,
+			        httpStatus,
+			        headers,
+			        context->redirectCount,
+			        context->currentUrl
+			    );
+			context->suppressStreamCallbacks =
+			    redirect.action != link_internal::LinkRedirectAction::None;
+			context->streamDispositionSet = true;
+		}
+		if (context->suppressStreamCallbacks) {
+			break;
+		}
+
+		if (streaming) {
 			if (!context->streamStarted) {
 				context->request->onStreamStart(context->streamInfo);
 				context->streamStarted = true;
@@ -213,27 +221,24 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 			break;
 		}
 
-		{
-			const size_t chunkSize = static_cast<size_t>(event->data_len);
-			const size_t currentSize = context->response->body.size();
-			if (chunkSize > context->owner->_config.maxResponseBodySize ||
-			    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
-				context->eventError = {
-				    LinkErrorCode::ResponseTooLarge,
-				    "response body is too large"
-				};
-				return ESP_FAIL;
-			}
-			if (!context->response->body
-			         .append(static_cast<const uint8_t *>(event->data), chunkSize, true)) {
-				context->eventError = {
-				    LinkErrorCode::AllocationFailed,
-				    "response body allocation failed"
-				};
-				return ESP_FAIL;
-			}
+		const size_t chunkSize = static_cast<size_t>(event->data_len);
+		const size_t currentSize = context->response->body.size();
+		if (chunkSize > context->owner->_config.maxResponseBodySize ||
+		    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
+			context->eventError = {
+			    LinkErrorCode::ResponseTooLarge, "response body is too large"
+			};
+			return ESP_FAIL;
+		}
+		if (!context->response->body
+		         .append(static_cast<const uint8_t *>(event->data), chunkSize, true)) {
+			context->eventError = {
+			    LinkErrorCode::AllocationFailed, "response body allocation failed"
+			};
+			return ESP_FAIL;
 		}
 		break;
+	}
 	default:
 		break;
 	}
