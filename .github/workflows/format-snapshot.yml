@@ -1,0 +1,30 @@
+name: Format Snapshot
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Apply formatting
+        run: |
+          find src tests examples -type f \( -name '*.h' -o -name '*.cpp' -o -name '*.ino' \) -print0 \
+            | xargs -0 clang-format -i
+
+      - name: Package formatted sources
+        run: tar -czf /tmp/link-formatted-sources.tar.gz src tests examples
+
+      - name: Upload formatted sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-formatted-sources
+          path: /tmp/link-formatted-sources.tar.gz
+          retention-days: 1
