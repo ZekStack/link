@@ -45,34 +45,7 @@ LinkDiagnostics LinkClient<CallbackStorageSize>::diagnostics() const {
 
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
-	LinkLock lifecycleLock(_lifecycleMutex);
-	if (!lifecycleLock) {
-		return LinkResult::error(LinkErrorCode::InternalError, "lifecycle mutex lock failed");
-	}
-
 	QueuedRequest queued;
-	LinkConfig configSnapshot;
-	uint32_t requestId = 0;
-	{
-		LinkLock lock(_mutex);
-		if (!lock) {
-			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-		}
-		if (_state == LinkState::Stopping) {
-			return LinkResult::error(LinkErrorCode::Stopping, "link is stopping");
-		}
-		if (_state != LinkState::Running) {
-			return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
-		}
-		configSnapshot = _config;
-		requestId = _nextRequestId++;
-	}
-
-	LinkResult copyResult = queued.copyFrom(request, configSnapshot, requestId);
-	if (!copyResult) {
-		return copyResult;
-	}
-
 	LinkLock lock(_mutex);
 	if (!lock) {
 		return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
@@ -88,6 +61,12 @@ LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
 	}
 	if (_queueCount >= _config.queueSize) {
 		return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
+	}
+
+	const uint32_t requestId = _nextRequestId++;
+	LinkResult copyResult = queued.copyFrom(request, _config, requestId);
+	if (!copyResult) {
+		return copyResult;
 	}
 
 	size_t slotIndex = _config.queueSize;
