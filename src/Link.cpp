@@ -34,6 +34,8 @@ const char *linkErrorCodeToString(LinkErrorCode code) {
 		return "InvalidUrl";
 	case LinkErrorCode::UrlTooLarge:
 		return "UrlTooLarge";
+	case LinkErrorCode::InvalidTimeout:
+		return "InvalidTimeout";
 	case LinkErrorCode::QueueFull:
 		return "QueueFull";
 	case LinkErrorCode::AllocationFailed:
@@ -95,21 +97,6 @@ LinkHeaders::~LinkHeaders() {
 	delete[] _entries;
 	_entries = nullptr;
 	_capacity = 0;
-}
-
-LinkHeaders::LinkHeaders(const LinkHeaders &other) {
-	copyFrom(other);
-}
-
-LinkHeaders &LinkHeaders::operator=(const LinkHeaders &other) {
-	if (this != &other) {
-		clear();
-		delete[] _entries;
-		_entries = nullptr;
-		_capacity = 0;
-		copyFrom(other);
-	}
-	return *this;
 }
 
 LinkHeaders::LinkHeaders(LinkHeaders &&other) noexcept {
@@ -263,8 +250,7 @@ LinkResult LinkHeaders::ensureStorage() {
 	_entries = new (std::nothrow) Entry[_maxHeaderCount];
 	if (_entries == nullptr) {
 		return LinkResult::error(
-		    LinkErrorCode::AllocationFailed,
-		    "header storage allocation failed"
+		    LinkErrorCode::AllocationFailed, "header storage allocation failed"
 		);
 	}
 	_capacity = _maxHeaderCount;
@@ -361,23 +347,6 @@ LinkResult LinkHeaders::copyFrom(const LinkHeaders &other) {
 		}
 	}
 	return LinkResult::ok();
-}
-
-LinkBody::LinkBody(const LinkBody &other) {
-	LinkResult result = copyFrom(other);
-	if (!result) {
-		_status = result.code;
-	}
-}
-
-LinkBody &LinkBody::operator=(const LinkBody &other) {
-	if (this != &other) {
-		LinkResult result = copyFrom(other);
-		if (!result) {
-			_status = result.code;
-		}
-	}
-	return *this;
 }
 
 LinkBodyView LinkBodyView::none() {
@@ -524,8 +493,7 @@ LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, 
 			if (written != size) {
 				out.clear();
 				return LinkResult::error(
-				    LinkErrorCode::JsonSerializeFailed,
-				    "json serialization failed"
+				    LinkErrorCode::JsonSerializeFailed, "json serialization failed"
 				);
 			}
 		}
