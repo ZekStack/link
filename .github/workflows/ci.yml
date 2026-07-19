@@ -52,7 +52,7 @@ jobs:
             echo "Embedded safety audit failed"
             exit 1
           fi
-          if grep -RInE '#include[[:space:]]+[<"](Fresh|Pulse|Signal|Tempo|Trace|Worker|Vault|Courier|Phase|Flow|Lingo)\\.h[>"]' src; then
+          if grep -RInE '#include[[:space:]]+[<"](Fresh|Pulse|Signal|Tempo|Trace|Worker|Vault|Courier|Phase|Flow|Lingo)\.h[>"]' src; then
             echo "Embedded safety audit failed: Link must not depend on other ZekStack libraries"
             exit 1
           fi
@@ -74,9 +74,25 @@ jobs:
             -o /tmp/link-host-tests
           /tmp/link-host-tests
 
+  persistent-host-tests:
+    runs-on: ubuntu-latest
+    needs: source-audit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and run persistent-client logic tests
+        run: |
+          g++ -std=c++20 -Wall -Wextra -pedantic \
+            -Itests/host/stubs \
+            -Isrc \
+            tests/host/test_persistent.cpp \
+            -o /tmp/link-persistent-host-tests
+          /tmp/link-persistent-host-tests
+
   build-examples:
     runs-on: ubuntu-latest
-    needs: [source-audit, host-logic-tests]
+    needs: [source-audit, host-logic-tests, persistent-host-tests]
     strategy:
       fail-fast: false
       matrix:
@@ -106,7 +122,7 @@ jobs:
       - name: Install PIOArduino ESP32 Platform
         run: pio pkg install -g -p "${PIOARDUINO_PLATFORM_URL}"
 
-      - name: Build library examples
+      - name: Build library examples against ArduinoJson 7.0.0
         run: |
           set -e
           for d in examples/*; do
@@ -116,26 +132,26 @@ jobs:
                 --board ${{ matrix.board }} \
                 --lib="." \
                 --project-option "platform=${PIOARDUINO_PLATFORM_URL}" \
-                --project-option "lib_deps=bblanchon/ArduinoJson@>=7.0.0" \
+                --project-option "lib_deps=bblanchon/ArduinoJson@7.0.0" \
                 --project-option "build_unflags=-std=gnu++11" \
                 --project-option "build_flags=-std=gnu++20"
             fi
           done
 
-      - name: Compile shutdown stress test
+      - name: Compile concurrent lifecycle stress test
         if: matrix.board == 'esp32dev'
         run: |
           pio ci tests/esp32/shutdown-stress \
             --board esp32dev \
             --lib="." \
             --project-option "platform=${PIOARDUINO_PLATFORM_URL}" \
-            --project-option "lib_deps=bblanchon/ArduinoJson@>=7.0.0" \
+            --project-option "lib_deps=bblanchon/ArduinoJson@7.0.0" \
             --project-option "build_unflags=-std=gnu++11" \
             --project-option "build_flags=-std=gnu++20"
 
   arduino-cli:
     runs-on: ubuntu-latest
-    needs: [source-audit, host-logic-tests]
+    needs: [source-audit, host-logic-tests, persistent-host-tests]
     strategy:
       fail-fast: false
       matrix:
@@ -172,7 +188,7 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
 
-      - name: Install ArduinoJson
+      - name: Install latest ArduinoJson v7
         run: arduino-cli lib install ArduinoJson
 
       - name: Add local library to sketchbook
@@ -199,7 +215,14 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [metadata, clang-format, source-audit, host-logic-tests, build-examples, arduino-cli]
+    needs:
+      - metadata
+      - clang-format
+      - source-audit
+      - host-logic-tests
+      - persistent-host-tests
+      - build-examples
+      - arduino-cli
     runs-on: ubuntu-latest
     permissions:
       contents: write
