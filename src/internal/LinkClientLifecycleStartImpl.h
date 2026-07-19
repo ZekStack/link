@@ -2,7 +2,8 @@ template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &config) const {
 	if (config.queueSize == 0 || config.maxConcurrentRequests == 0) {
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "queue and concurrency must be nonzero"
+		    LinkErrorCode::InvalidConfig,
+		    "queue and concurrency must be nonzero"
 		);
 	}
 	if (config.queueSize < config.maxConcurrentRequests) {
@@ -27,17 +28,20 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 	}
 	if (config.defaultTimeoutMs > static_cast<uint32_t>(INT_MAX)) {
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "default timeout exceeds ESP-IDF limit"
+		    LinkErrorCode::InvalidConfig,
+		    "default timeout exceeds ESP-IDF limit"
 		);
 	}
 	if (config.maxRequestBodySize > static_cast<size_t>(INT_MAX)) {
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "request body limit exceeds ESP-IDF limit"
+		    LinkErrorCode::InvalidConfig,
+		    "request body limit exceeds ESP-IDF limit"
 		);
 	}
 	if (config.streamChunkSize > static_cast<size_t>(INT_MAX)) {
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "stream chunk size exceeds ESP-IDF limit"
+		    LinkErrorCode::InvalidConfig,
+		    "stream chunk size exceeds ESP-IDF limit"
 		);
 	}
 	if (config.maxHeaderNameSize > config.maxTotalHeaderSize ||
@@ -47,7 +51,8 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 	UBaseType_t signalCapacity = 0;
 	if (!link_internal::linkWorkerSignalCapacity(config, signalCapacity)) {
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "worker signal capacity is too large"
+		    LinkErrorCode::InvalidConfig,
+		    "worker signal capacity is too large"
 		);
 	}
 	return LinkResult::ok();
@@ -75,7 +80,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		}
 		if (_state != LinkState::Uninitialized) {
 			return LinkResult::error(
-			    LinkErrorCode::AlreadyInitialized, "link is already initialized"
+			    LinkErrorCode::AlreadyInitialized,
+			    "link is already initialized"
 			);
 		}
 		LinkResult configResult = validateConfig(config);
@@ -102,7 +108,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			_config = LinkConfig{};
 			_state = LinkState::Uninitialized;
 			return LinkResult::error(
-			    LinkErrorCode::AllocationFailed, "link storage allocation failed"
+			    LinkErrorCode::AllocationFailed,
+			    "link storage allocation failed"
 			);
 		}
 		for (size_t i = 0; i < config.queueSize; ++i) {
@@ -121,7 +128,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 	if (!link_internal::linkWorkerSignalCapacity(config, signalCapacity)) {
 		forceDeinitBlocking();
 		return LinkResult::error(
-		    LinkErrorCode::InvalidConfig, "worker signal capacity is too large"
+		    LinkErrorCode::InvalidConfig,
+		    "worker signal capacity is too large"
 		);
 	}
 	SemaphoreHandle_t items = xSemaphoreCreateCounting(signalCapacity, 0);
@@ -175,7 +183,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			}
 			forceDeinitBlocking();
 			return LinkResult::error(
-			    LinkErrorCode::AllocationFailed, "worker task creation failed"
+			    LinkErrorCode::AllocationFailed,
+			    "worker task creation failed"
 			);
 		}
 	}

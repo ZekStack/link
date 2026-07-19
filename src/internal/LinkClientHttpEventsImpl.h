@@ -225,15 +225,14 @@ esp_err_t LinkClient<CallbackStorageSize>::httpEventHandler(esp_http_client_even
 		const size_t currentSize = context->response->body.size();
 		if (chunkSize > context->owner->_config.maxResponseBodySize ||
 		    currentSize > context->owner->_config.maxResponseBodySize - chunkSize) {
-			context->eventError = {
-			    LinkErrorCode::ResponseTooLarge, "response body is too large"
-			};
+			context->eventError = {LinkErrorCode::ResponseTooLarge, "response body is too large"};
 			return ESP_FAIL;
 		}
 		if (!context->response->body
 		         .append(static_cast<const uint8_t *>(event->data), chunkSize, true)) {
 			context->eventError = {
-			    LinkErrorCode::AllocationFailed, "response body allocation failed"
+			    LinkErrorCode::AllocationFailed,
+			    "response body allocation failed"
 			};
 			return ESP_FAIL;
 		}

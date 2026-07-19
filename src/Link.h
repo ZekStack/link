@@ -268,7 +268,10 @@ struct LinkResponse {
 		}
 		LinkOwnedBuffer nextBody;
 		if (!nextBody.copyFrom(other.body)) {
-			return LinkResult::error(LinkErrorCode::AllocationFailed, "response body allocation failed");
+			return LinkResult::error(
+			    LinkErrorCode::AllocationFailed,
+			    "response body allocation failed"
+			);
 		}
 		error = other.error;
 		httpStatus = other.httpStatus;
@@ -413,7 +416,8 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		    request.timeoutMs == 0 ? config.defaultTimeoutMs : request.timeoutMs;
 		if (effectiveTimeout == 0 || effectiveTimeout > static_cast<uint32_t>(INT_MAX)) {
 			return LinkResult::error(
-			    LinkErrorCode::InvalidTimeout, "request timeout exceeds ESP-IDF limit"
+			    LinkErrorCode::InvalidTimeout,
+			    "request timeout exceeds ESP-IDF limit"
 			);
 		}
 		const size_t urlSize = std::strlen(request.url);
@@ -454,7 +458,8 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 
 		if (responseMode == LinkResponseMode::Buffered && !parseJsonResponse && !onResponse) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge, "response callback is required"
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is required"
 			);
 		}
 		if (parseJsonResponse && !onJsonResponse) {
@@ -463,7 +468,8 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		if (responseMode == LinkResponseMode::Stream &&
 		    (!onStreamStart || !onStreamChunk || !onStreamEnd)) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge, "stream callbacks are required"
+			    LinkErrorCode::CallbackTooLarge,
+			    "stream callbacks are required"
 			);
 		}
 		return LinkResult::ok();
@@ -513,7 +519,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge, "response callback is too large"
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is too large"
 			);
 		}
 		return fetch(request);
@@ -539,7 +546,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 		request.body = body;
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge, "response callback is too large"
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is too large"
 			);
 		}
 		return fetch(request);
@@ -639,7 +647,8 @@ template <size_t CallbackStorageSize> class LinkClient {
 		    !request.onStreamChunk.assign(std::forward<ChunkCallback>(onChunk)) ||
 		    !request.onStreamEnd.assign(std::forward<EndCallback>(onEnd))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge, "stream callback is too large"
+			    LinkErrorCode::CallbackTooLarge,
+			    "stream callback is too large"
 			);
 		}
 		return fetch(request);

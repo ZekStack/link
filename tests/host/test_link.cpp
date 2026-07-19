@@ -12,7 +12,9 @@ void testResultAndStateStrings() {
 	LinkResult ok = LinkResult::ok();
 	assert(ok);
 	assert(std::strcmp(linkErrorCodeToString(LinkErrorCode::Stopping), "Stopping") == 0);
-	assert(std::strcmp(linkErrorCodeToString(LinkErrorCode::InvalidTimeout), "InvalidTimeout") == 0);
+	assert(
+	    std::strcmp(linkErrorCodeToString(LinkErrorCode::InvalidTimeout), "InvalidTimeout") == 0
+	);
 	assert(
 	    std::strcmp(linkErrorCodeToString(LinkErrorCode::RedirectRejected), "RedirectRejected") == 0
 	);
@@ -171,7 +173,8 @@ void testOwnedBufferAppend() {
 void testOperationErrorsTakePrecedence() {
 	const LinkError transportError = {LinkErrorCode::ReceiveFailed, "transport failed"};
 	const LinkError allocationError = {
-	    LinkErrorCode::AllocationFailed, "response body allocation failed"
+	    LinkErrorCode::AllocationFailed,
+	    "response body allocation failed"
 	};
 	const LinkError selected =
 	    link_internal::linkPreserveOperationError(allocationError, transportError);
@@ -194,7 +197,12 @@ void testRedirectDecisions() {
 	const int followedStatuses[] = {301, 302, 303, 307, 308};
 	for (int status : followedStatuses) {
 		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config, LinkMethod::Get, status, headers, 0, currentUrl
+		    config,
+		    LinkMethod::Get,
+		    status,
+		    headers,
+		    0,
+		    currentUrl
 		);
 		assert(decision.action == link_internal::LinkRedirectAction::Follow);
 		assert(!decision.stripRequestHeaders);
@@ -204,7 +212,12 @@ void testRedirectDecisions() {
 	const int finalStatuses[] = {200, 300, 304, 305, 306, 404};
 	for (int status : finalStatuses) {
 		const link_internal::LinkRedirectDecision decision = link_internal::linkEvaluateRedirect(
-		    config, LinkMethod::Get, status, headers, 0, currentUrl
+		    config,
+		    LinkMethod::Get,
+		    status,
+		    headers,
+		    0,
+		    currentUrl
 		);
 		assert(decision.action == link_internal::LinkRedirectAction::None);
 	}
@@ -223,7 +236,12 @@ void testRedirectDecisions() {
 	LinkHeaders missingLocation;
 	assert(
 	    link_internal::linkEvaluateRedirect(
-	        config, LinkMethod::Get, 302, missingLocation, 0, currentUrl
+	        config,
+	        LinkMethod::Get,
+	        302,
+	        missingLocation,
+	        0,
+	        currentUrl
 	    )
 	        .action == link_internal::LinkRedirectAction::None
 	);
@@ -231,7 +249,12 @@ void testRedirectDecisions() {
 	assert(relativeLocation.add("Location", "/final"));
 	assert(
 	    link_internal::linkEvaluateRedirect(
-	        config, LinkMethod::Get, 302, relativeLocation, 0, currentUrl
+	        config,
+	        LinkMethod::Get,
+	        302,
+	        relativeLocation,
+	        0,
+	        currentUrl
 	    )
 	        .action == link_internal::LinkRedirectAction::None
 	);
@@ -257,7 +280,12 @@ void testRedirectDecisions() {
 	assert(crossOrigin.add("Location", "https://api.example.com/final"));
 	const link_internal::LinkRedirectDecision rejectedCrossOrigin =
 	    link_internal::linkEvaluateRedirect(
-	        config, LinkMethod::Get, 302, crossOrigin, 0, currentUrl
+	        config,
+	        LinkMethod::Get,
+	        302,
+	        crossOrigin,
+	        0,
+	        currentUrl
 	    );
 	assert(rejectedCrossOrigin.action == link_internal::LinkRedirectAction::Error);
 	assert(rejectedCrossOrigin.error.code == LinkErrorCode::RedirectRejected);
@@ -265,7 +293,12 @@ void testRedirectDecisions() {
 	config.allowCrossOriginRedirects = true;
 	const link_internal::LinkRedirectDecision allowedCrossOrigin =
 	    link_internal::linkEvaluateRedirect(
-	        config, LinkMethod::Get, 302, crossOrigin, 0, currentUrl
+	        config,
+	        LinkMethod::Get,
+	        302,
+	        crossOrigin,
+	        0,
+	        currentUrl
 	    );
 	assert(allowedCrossOrigin.action == link_internal::LinkRedirectAction::Follow);
 	assert(allowedCrossOrigin.stripRequestHeaders);
@@ -286,7 +319,12 @@ void testRedirectDecisions() {
 	LinkHeaders explicitDefaultPort;
 	assert(explicitDefaultPort.add("Location", "https://EXAMPLE.com:443/final"));
 	const link_internal::LinkRedirectDecision sameDefaultPort = link_internal::linkEvaluateRedirect(
-	    config, LinkMethod::Get, 302, explicitDefaultPort, 0, currentUrl
+	    config,
+	    LinkMethod::Get,
+	    302,
+	    explicitDefaultPort,
+	    0,
+	    currentUrl
 	);
 	assert(sameDefaultPort.action == link_internal::LinkRedirectAction::Follow);
 	assert(!sameDefaultPort.stripRequestHeaders);
@@ -294,7 +332,12 @@ void testRedirectDecisions() {
 	LinkHeaders differentPort;
 	assert(differentPort.add("Location", "https://example.com:444/final"));
 	const link_internal::LinkRedirectDecision changedPort = link_internal::linkEvaluateRedirect(
-	    config, LinkMethod::Get, 302, differentPort, 0, currentUrl
+	    config,
+	    LinkMethod::Get,
+	    302,
+	    differentPort,
+	    0,
+	    currentUrl
 	);
 	assert(changedPort.action == link_internal::LinkRedirectAction::Follow);
 	assert(changedPort.stripRequestHeaders);
@@ -303,7 +346,12 @@ void testRedirectDecisions() {
 	assert(invalidPort.add("Location", "https://example.com:999999999999999999999/final"));
 	const link_internal::LinkRedirectDecision rejectedInvalidPort =
 	    link_internal::linkEvaluateRedirect(
-	        config, LinkMethod::Get, 302, invalidPort, 0, currentUrl
+	        config,
+	        LinkMethod::Get,
+	        302,
+	        invalidPort,
+	        0,
+	        currentUrl
 	    );
 	assert(rejectedInvalidPort.action == link_internal::LinkRedirectAction::Error);
 	assert(rejectedInvalidPort.error.code == LinkErrorCode::RedirectRejected);

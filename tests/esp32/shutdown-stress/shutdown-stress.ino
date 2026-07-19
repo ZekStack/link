@@ -148,7 +148,8 @@ void setup() {
 	delay(500);
 
 	const bool perRequestPassed = runMode(LinkConnectionMode::PerRequest);
-	const bool persistentPassed = perRequestPassed && runMode(LinkConnectionMode::PersistentPerWorker);
+	const bool persistentPassed =
+	    perRequestPassed && runMode(LinkConnectionMode::PersistentPerWorker);
 	if (!persistentPassed) {
 		Serial.printf(
 		    "link lifecycle stress failed: callbacks=%u cancelled=%u unexpected=%u\n",
