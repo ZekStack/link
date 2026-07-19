@@ -68,6 +68,19 @@ bool LinkClient<CallbackStorageSize>::shouldUsePsramStack() const {
 
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
+	{
+		LinkLock lock(_mutex);
+		if (!lock) {
+			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
+		}
+		if (_state != LinkState::Uninitialized) {
+			return LinkResult::error(
+			    LinkErrorCode::AlreadyInitialized,
+			    "link is already initialized"
+			);
+		}
+	}
+
 	LinkLock lifecycleLock(_lifecycleMutex);
 	if (!lifecycleLock) {
 		return LinkResult::error(LinkErrorCode::InternalError, "lifecycle mutex lock failed");
