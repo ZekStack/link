@@ -87,10 +87,10 @@ Body views do not allocate and do not own their source data. Link validates and 
 
 Allocation-backed public response storage is move-only by default. `LinkHeaders`, `LinkBody`, `LinkOwnedBuffer`, and `LinkResponse` do not provide implicit copy construction or assignment.
 
-Move a response when transferring ownership:
+Application-owned response objects can transfer existing ownership without allocation:
 
 ```cpp
-LinkResponse stored = std::move(response);
+LinkResponse stored = std::move(ownedResponse);
 ```
 
 Callbacks receive a `const LinkResponse &`, so application code normally extracts or explicitly duplicates the required data during the callback. Use the result-returning duplication API when a full response copy is needed:
