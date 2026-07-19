@@ -57,6 +57,8 @@ enum class LinkState : uint8_t { Uninitialized, Starting, Running, Stopping };
 
 enum class LinkStackType : uint8_t { Internal, Psram, Auto };
 
+enum class LinkConnectionMode : uint8_t { PerRequest, PersistentPerWorker };
+
 enum class LinkMethod : uint8_t { Get, Post, Put, Patch, Delete, Head };
 
 enum class LinkResponseMode : uint8_t { Buffered, Stream };
@@ -101,6 +103,9 @@ struct LinkConfig {
 	size_t maxConcurrentRequests = 3;
 
 	uint32_t defaultTimeoutMs = 15000;
+	LinkConnectionMode connectionMode = LinkConnectionMode::PerRequest;
+	uint32_t persistentIdleTimeoutMs = 5U * 60U * 1000U;
+	uint32_t persistentMaxRequestsPerHandle = 0;
 
 	size_t maxUrlSize = 512;
 	size_t maxRequestBodySize = 8192;
@@ -116,6 +121,22 @@ struct LinkConfig {
 	bool allowCrossOriginRedirects = false;
 	bool allowHttpsToHttpRedirects = false;
 	uint8_t maxRedirects = 3;
+};
+
+struct LinkDiagnostics {
+	uint32_t requestsSubmitted = 0;
+	uint32_t requestsCompleted = 0;
+	uint32_t httpClientCreates = 0;
+	uint32_t httpClientReuses = 0;
+	uint32_t httpClientCleanups = 0;
+	uint32_t originReuseMisses = 0;
+	uint32_t idleEvictions = 0;
+	uint32_t requestLimitEvictions = 0;
+	uint32_t poisonedEvictions = 0;
+	uint32_t transportConnectedEvents = 0;
+	uint32_t transportDisconnectedEvents = 0;
+	size_t activeHttpClients = 0;
+	size_t peakHttpClients = 0;
 };
 
 class LinkBody;
@@ -458,6 +479,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	bool isInitialized() const;
 	LinkState state() const;
+	LinkDiagnostics diagnostics() const;
 
 	LinkResult fetch(const Request &request);
 
@@ -476,8 +498,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return headerResult;
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
-			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
+			return LinkResult::error(LinkErrorCode::CallbackTooLarge,
 			    "response callback is too large"
 			);
 		}
@@ -493,7 +514,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	template <typename Callback>
 	LinkResult post(
 	    const char *url, const LinkHeaders &headers, const LinkBodyView &body, Callback &&callback
-	) {
+ ) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -545,7 +566,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	template <typename Callback>
 	LinkResult postJson(
 	    const char *url, const LinkHeaders &headers, const JsonDocument &json, Callback &&callback
-	) {
+ ) {
 		Request request;
 		request.method = LinkMethod::Post;
 		request.url = url;
@@ -560,9 +581,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return acceptResult;
 		}
 		if (!request.headers.has("Content-Type")) {
-			LinkResult headerResult = request.headers.set("Content-Type", "application/json");
-			if (!headerResult) {
-				return headerResult;
+			LinkResult contentTypeResult =
+			    request.headers.set("Content-Type", "application/json");
+			if (!contentTypeResult) {
+				return contentTypeResult;
 			}
 		}
 		if (!request.onJsonResponse.assign(std::forward<Callback>(callback))) {
@@ -615,14 +637,6 @@ template <size_t CallbackStorageSize> class LinkClient {
   private:
 	using QueuedRequest = link_internal::QueuedLinkRequest<CallbackStorageSize>;
 
-	struct WorkerRecord {
-		LinkClient *owner = nullptr;
-		size_t index = 0;
-		TaskHandle_t handle = nullptr;
-		bool createdWithCaps = false;
-		bool active = false;
-	};
-
 #if defined(ESP32)
 	struct HttpEventContext {
 		LinkClient *owner = nullptr;
@@ -638,7 +652,67 @@ template <size_t CallbackStorageSize> class LinkClient {
 		size_t totalReceived = 0;
 	};
 
+	struct WorkerHttpSession {
+		esp_http_client_handle_t client = nullptr;
+		LinkOwnedBuffer originHost;
+		uint16_t originPort = 0;
+		bool originHttps = false;
+		uint32_t createdAtMs = 0;
+		uint32_t lastUsedAtMs = 0;
+		uint32_t requestCount = 0;
+		bool poisoned = false;
+		HttpEventContext eventContext;
+	};
+#endif
+
+	struct WorkerRecord {
+		LinkClient *owner = nullptr;
+		size_t index = 0;
+		TaskHandle_t handle = nullptr;
+		bool createdWithCaps = false;
+		bool active = false;
+#if defined(ESP32)
+		WorkerHttpSession http;
+#endif
+	};
+
+#if defined(ESP32)
+	enum class HttpSessionCleanupReason : uint8_t {
+		None,
+		OriginChanged,
+		IdleExpired,
+		RequestLimitReached,
+		Poisoned,
+		Shutdown
+	};
+
 	static esp_err_t httpEventHandler(esp_http_client_event_t *event);
+	void resetHttpEventContext(
+	    HttpEventContext &context,
+	    QueuedRequest &request,
+	    LinkResponse &response,
+	    const char *currentUrl,
+	    uint8_t redirectCount
+	);
+	esp_http_client_handle_t createHttpClient(
+	    HttpEventContext &context, const char *url, uint32_t timeoutMs
+	);
+	LinkResult preparePersistentHttpClient(
+	    WorkerRecord &worker,
+	    const char *url,
+	    uint32_t timeoutMs,
+	    esp_http_client_handle_t &client
+	);
+	void cleanupPersistentHttpClient(WorkerRecord &worker, HttpSessionCleanupReason reason);
+	void cleanupHttpClient(esp_http_client_handle_t client);
+	bool scrubHttpClientRequest(
+	    esp_http_client_handle_t client, const LinkHeaders &headers, size_t appliedHeaderCount
+	);
+	bool persistentSessionMatchesUrl(const WorkerHttpSession &session, const char *url) const;
+	void recordHttpClientCreated();
+	void recordHttpClientReused();
+	void recordTransportConnected();
+	void recordTransportDisconnected();
 #endif
 
 	static void taskEntry(void *arg);
@@ -646,7 +720,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	bool popRequest(size_t &slotIndex);
 	void releaseSlot(size_t slotIndex);
 	void invokeCancelled(QueuedRequest &request);
-	void processRequest(QueuedRequest &request);
+	void processRequest(WorkerRecord &worker, QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;
 	bool shouldUsePsramStack() const;
 	LinkResult addJsonAccept(LinkHeaders &headers) const;
@@ -656,15 +730,13 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void wakeWorkers();
 	LinkResult waitForWorkers(bool waitForever);
 	LinkResult freeRuntimeStorage();
+	void recordRequestCompleted();
 
-#if defined(ESP32)
-	void performHttpRequest(QueuedRequest &request);
-#else
-	void performHttpRequest(QueuedRequest &request);
-#endif
+	void performHttpRequest(WorkerRecord &worker, QueuedRequest &request);
 
 	mutable LinkMutex _mutex;
 	LinkConfig _config{};
+	LinkDiagnostics _diagnostics{};
 	// When deinit() times out, Stopping means workers may still own slots.
 	// Do not free task-owned storage until all workers become inactive.
 	LinkState _state = LinkState::Uninitialized;
