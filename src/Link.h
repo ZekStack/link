@@ -8,6 +8,7 @@
 #include "internal/LinkMutex.h"
 #include "internal/LinkTaskSupport.h"
 
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +33,7 @@ enum class LinkErrorCode : uint8_t {
 	Stopping,
 	InvalidUrl,
 	UrlTooLarge,
+	InvalidTimeout,
 	QueueFull,
 	AllocationFailed,
 	CallbackTooLarge,
@@ -54,17 +56,11 @@ enum class LinkErrorCode : uint8_t {
 };
 
 enum class LinkState : uint8_t { Uninitialized, Starting, Running, Stopping };
-
 enum class LinkStackType : uint8_t { Internal, Psram, Auto };
-
 enum class LinkConnectionMode : uint8_t { PerRequest, PersistentPerWorker };
-
 enum class LinkMethod : uint8_t { Get, Post, Put, Patch, Delete, Head };
-
 enum class LinkResponseMode : uint8_t { Buffered, Stream };
-
 enum class LinkBodyType : uint8_t { None, Text, Json, Binary };
-
 enum class LinkStreamAction : uint8_t { Continue, Cancel };
 
 struct LinkError {
@@ -150,9 +146,8 @@ class LinkHeaders {
 	LinkHeaders() = default;
 	~LinkHeaders();
 
-	LinkHeaders(const LinkHeaders &other);
-	LinkHeaders &operator=(const LinkHeaders &other);
-
+	LinkHeaders(const LinkHeaders &) = delete;
+	LinkHeaders &operator=(const LinkHeaders &) = delete;
 	LinkHeaders(LinkHeaders &&other) noexcept;
 	LinkHeaders &operator=(LinkHeaders &&other) noexcept;
 
@@ -226,8 +221,8 @@ class LinkBodyView {
 class LinkBody {
   public:
 	LinkBody() = default;
-	LinkBody(const LinkBody &other);
-	LinkBody &operator=(const LinkBody &other);
+	LinkBody(const LinkBody &) = delete;
+	LinkBody &operator=(const LinkBody &) = delete;
 	LinkBody(LinkBody &&other) noexcept = default;
 	LinkBody &operator=(LinkBody &&other) noexcept = default;
 
@@ -256,26 +251,47 @@ struct LinkResponse {
 	LinkHeaders headers;
 	LinkOwnedBuffer body;
 
+	LinkResponse() = default;
+	LinkResponse(const LinkResponse &) = delete;
+	LinkResponse &operator=(const LinkResponse &) = delete;
+	LinkResponse(LinkResponse &&) noexcept = default;
+	LinkResponse &operator=(LinkResponse &&) noexcept = default;
+
+	LinkResult copyFrom(const LinkResponse &other) {
+		if (this == &other) {
+			return LinkResult::ok();
+		}
+		LinkHeaders nextHeaders;
+		LinkResult headerResult = nextHeaders.copyFrom(other.headers);
+		if (!headerResult) {
+			return headerResult;
+		}
+		LinkOwnedBuffer nextBody;
+		if (!nextBody.copyFrom(other.body)) {
+			return LinkResult::error(LinkErrorCode::AllocationFailed, "response body allocation failed");
+		}
+		error = other.error;
+		httpStatus = other.httpStatus;
+		headers = std::move(nextHeaders);
+		body = std::move(nextBody);
+		return LinkResult::ok();
+	}
+
 	explicit operator bool() const {
 		return error.code == LinkErrorCode::Ok;
 	}
-
 	bool succeeded() const {
 		return error.code == LinkErrorCode::Ok;
 	}
-
 	bool isHttpOk() const {
 		return httpStatus >= 200 && httpStatus <= 299;
 	}
-
 	bool isRedirect() const {
 		return httpStatus >= 300 && httpStatus <= 399;
 	}
-
 	bool isClientError() const {
 		return httpStatus >= 400 && httpStatus <= 499;
 	}
-
 	bool isServerError() const {
 		return httpStatus >= 500 && httpStatus <= 599;
 	}
@@ -290,7 +306,6 @@ struct LinkJsonResponse {
 	explicit operator bool() const {
 		return error.code == LinkErrorCode::Ok;
 	}
-
 	bool isHttpOk() const {
 		return httpStatus >= 200 && httpStatus <= 299;
 	}
@@ -394,6 +409,13 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		if (request.url == nullptr || !linkUrlLooksValid(request.url)) {
 			return LinkResult::error(LinkErrorCode::InvalidUrl, "url is invalid");
 		}
+		const uint32_t effectiveTimeout =
+		    request.timeoutMs == 0 ? config.defaultTimeoutMs : request.timeoutMs;
+		if (effectiveTimeout == 0 || effectiveTimeout > static_cast<uint32_t>(INT_MAX)) {
+			return LinkResult::error(
+			    LinkErrorCode::InvalidTimeout, "request timeout exceeds ESP-IDF limit"
+			);
+		}
 		const size_t urlSize = std::strlen(request.url);
 		if (urlSize > config.maxUrlSize) {
 			return LinkResult::error(LinkErrorCode::UrlTooLarge, "url is too large");
@@ -407,7 +429,6 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		    config.maxHeaderValueSize,
 		    config.maxTotalHeaderSize
 		);
-		// Copy manually so queued headers are revalidated against the active LinkConfig limits.
 		for (size_t i = 0; i < request.headers.size(); ++i) {
 			LinkResult headerResult =
 			    headers.add(request.headers.nameAt(i), request.headers.valueAt(i));
@@ -415,7 +436,6 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 				return headerResult;
 			}
 		}
-
 		LinkResult bodyResult = linkBodyFromView(request.body, config, body);
 		if (!bodyResult) {
 			return bodyResult;
@@ -425,7 +445,7 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		method = request.method;
 		responseMode = request.responseMode;
 		parseJsonResponse = request.parseJsonResponse;
-		timeoutMs = request.timeoutMs == 0 ? config.defaultTimeoutMs : request.timeoutMs;
+		timeoutMs = effectiveTimeout;
 		onResponse = request.onResponse;
 		onJsonResponse = request.onJsonResponse;
 		onStreamStart = request.onStreamStart;
@@ -434,8 +454,7 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 
 		if (responseMode == LinkResponseMode::Buffered && !parseJsonResponse && !onResponse) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
-			    "response callback is required"
+			    LinkErrorCode::CallbackTooLarge, "response callback is required"
 			);
 		}
 		if (parseJsonResponse && !onJsonResponse) {
@@ -444,8 +463,7 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		if (responseMode == LinkResponseMode::Stream &&
 		    (!onStreamStart || !onStreamChunk || !onStreamEnd)) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
-			    "stream callbacks are required"
+			    LinkErrorCode::CallbackTooLarge, "stream callbacks are required"
 			);
 		}
 		return LinkResult::ok();
@@ -466,21 +484,17 @@ template <size_t CallbackStorageSize> class LinkClient {
 	using StreamEndCallback = typename Request::StreamEndCallback;
 
 	LinkClient() = default;
-
 	~LinkClient() {
 		forceDeinitBlocking();
 	}
-
 	LinkClient(const LinkClient &) = delete;
 	LinkClient &operator=(const LinkClient &) = delete;
 
 	LinkResult init(const LinkConfig &config = LinkConfig());
 	LinkResult deinit();
-
 	bool isInitialized() const;
 	LinkState state() const;
 	LinkDiagnostics diagnostics() const;
-
 	LinkResult fetch(const Request &request);
 
 	template <typename Callback> LinkResult get(const char *url, Callback &&callback) {
@@ -499,8 +513,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
-			    "response callback is too large"
+			    LinkErrorCode::CallbackTooLarge, "response callback is too large"
 			);
 		}
 		return fetch(request);
@@ -526,8 +539,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 		request.body = body;
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
-			    "response callback is too large"
+			    LinkErrorCode::CallbackTooLarge, "response callback is too large"
 			);
 		}
 		return fetch(request);
@@ -627,8 +639,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 		    !request.onStreamChunk.assign(std::forward<ChunkCallback>(onChunk)) ||
 		    !request.onStreamEnd.assign(std::forward<EndCallback>(onEnd))) {
 			return LinkResult::error(
-			    LinkErrorCode::CallbackTooLarge,
-			    "stream callback is too large"
+			    LinkErrorCode::CallbackTooLarge, "stream callback is too large"
 			);
 		}
 		return fetch(request);
@@ -727,14 +738,12 @@ template <size_t CallbackStorageSize> class LinkClient {
 	LinkResult waitForWorkers(bool waitForever);
 	LinkResult freeRuntimeStorage();
 	void recordRequestCompleted();
-
 	void performHttpRequest(WorkerRecord &worker, QueuedRequest &request);
 
+	mutable LinkMutex _lifecycleMutex;
 	mutable LinkMutex _mutex;
 	LinkConfig _config{};
 	LinkDiagnostics _diagnostics{};
-	// When deinit() times out, Stopping means workers may still own slots.
-	// Do not free task-owned storage until all workers become inactive.
 	LinkState _state = LinkState::Uninitialized;
 	bool _stopWakeIssued = false;
 	QueuedRequest *_slots = nullptr;
