@@ -14,7 +14,7 @@ Link helps you communicate with APIs and backend services in Arduino ESP32 proje
 * **Concurrent workers** - run more than one HTTP request at the same time with a bounded worker pool.
 * **ESP32-friendly memory** - accepted request bodies, response bodies, URLs, headers, serialized JSON, callbacks, and stream buffers have explicit limits.
 * **Clear API** - operations return `LinkResult`; HTTP status codes stay separate from transport failures.
-* **Production-minded** - no exceptions, FreeRTOS mutex protection, bindable callbacks, and PSRAM-preferred payload buffers.
+* **Production-minded** - no exceptions, serialized lifecycle transitions, atomic queue publication, bindable callbacks, and PSRAM-preferred payload buffers.
 
 ## Install
 
@@ -94,13 +94,16 @@ void loop() {
 
 * Protect shared application state touched from callbacks.
 * Requests are started in queue order, but may complete out of order when more than one worker is enabled.
-* User callbacks are not called while Link internal mutexes are held.
+* Submission preparation, queue publication, and worker signaling form one runtime critical section. A successful submission always owns a slot and has a corresponding worker permit.
+* User callbacks are not called while Link's runtime mutex is held. A callback may submit another request; if shutdown has started, the submission returns `Stopping`.
+* Every accepted request receives exactly one terminal callback before a successful `deinit()` returns.
 * `LinkJsonResponse::json` is valid only during the callback unless the user copies the needed data.
+* Allocation-backed response storage is move-only. Use explicit result-returning `copyFrom()` operations when duplication is required.
 * HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
 * `deinit()` lets worker tasks cancel queued requests and waits for active workers to exit. If the public wait times out, Link stays in `Stopping` and keeps worker-owned storage alive so a later `deinit()` can finish cleanup.
 * The destructor performs blocking shutdown. It assumes active HTTP operations eventually return through their configured nonzero request timeout.
 * Do not call `deinit()` or destroy a `Link` instance from one of its callbacks; shutdown waits for that callback's worker task to exit.
-* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in. Caller-supplied headers are stripped after an origin change.
+* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in. Caller-supplied headers are stripped after an origin change. Intermediate redirect bodies are discarded.
 
 ## Examples
 
@@ -126,13 +129,15 @@ Detailed documentation is available in the `docs/` folder.
 
 | Document | Description |
 | --- | --- |
-| [`docs/api.md`](docs/api.md) | Public classes, result types, and callback aliases. |
+| [`docs/api.md`](docs/api.md) | Public classes, result types, ownership, and callback aliases. |
 | [`docs/callbacks.md`](docs/callbacks.md) | Callback storage, binding, and execution context. |
-| [`docs/concurrency.md`](docs/concurrency.md) | Queue, worker pool, lifecycle, and completion ordering. |
+| [`docs/concurrency.md`](docs/concurrency.md) | Queue publication, worker pool, lifecycle, and completion guarantees. |
 | [`docs/errors.md`](docs/errors.md) | Error codes and HTTP status behavior. |
 | [`docs/json.md`](docs/json.md) | ArduinoJson helpers and JSON lifetime rules. |
 | [`docs/streaming.md`](docs/streaming.md) | Streaming downloads and cancellation. |
-| [`docs/memory.md`](docs/memory.md) | Bounded memory configuration. |
+| [`docs/memory.md`](docs/memory.md) | Bounded memory, ESP-IDF ranges, and explicit copy behavior. |
+| [`docs/persistent-http.md`](docs/persistent-http.md) | Optional per-worker persistent HTTP clients. |
+| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.1.0 qualification. |
 
 ## API overview
 
@@ -142,6 +147,7 @@ Link client;
 LinkResult init(const LinkConfig &config);
 LinkResult deinit();
 LinkResult fetch(const LinkRequest &request);
+LinkDiagnostics diagnostics() const;
 
 client.get(url, callback);
 client.post(url, body, callback);
@@ -173,6 +179,9 @@ LinkConfig config;
 config.queueSize = 10;
 config.maxConcurrentRequests = 3;
 config.defaultTimeoutMs = 15000;
+config.connectionMode = LinkConnectionMode::PerRequest;
+config.persistentIdleTimeoutMs = 5U * 60U * 1000U;
+config.persistentMaxRequestsPerHandle = 0;
 config.maxUrlSize = 512;
 config.maxRequestBodySize = 8192;
 config.maxResponseBodySize = 8192;
@@ -186,6 +195,8 @@ config.allowHttpsToHttpRedirects = false;
 `queueSize` is the maximum number of accepted in-flight requests, including queued and actively running requests. It must be at least `maxConcurrentRequests`.
 
 Request body factories return non-owning `LinkBodyView` values. Link validates a view against the active configuration and copies it into owned queue storage before submission returns. The source text, bytes, or `JsonDocument` therefore only needs to remain valid until `fetch()`, `post()`, or `postJson()` returns.
+
+Timeouts, request body limits, and stream buffer sizes are validated before being narrowed to signed ESP-IDF parameters. An oversized explicit request timeout returns `InvalidTimeout` before queue publication.
 
 `maxSerializedJsonSize` limits serialized JSON request and response bytes. ArduinoJson's parsed document uses additional heap memory based on the JSON structure.
 
