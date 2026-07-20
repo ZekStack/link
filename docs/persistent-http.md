@@ -37,7 +37,7 @@ A cross-origin redirect or later request replaces the worker's retained handle. 
 
 ## Request isolation
 
-Before and after every transfer, Link resets request-specific state on the ESP-IDF handle. Caller-supplied headers and POST data are removed before the queued request storage is released.
+Fresh HTTP handles start with no request-specific state and are configured directly. After a transfer on a persistent handle, Link clears POST data before removing caller-supplied headers so no queued request storage remains referenced. ESP-IDF's not-found result is treated as already clean, which makes cleanup idempotent when `Content-Type` was absent or was removed while clearing POST data. Per-request handles rely on immediate `esp_http_client_cleanup()` instead of mutating a handle that is about to be destroyed.
 
 If setup, transfer, callback processing, response buffering, or state scrubbing fails, the retained handle is marked unusable and cleaned up. The failed operation is returned to the caller normally.
 

@@ -11,6 +11,18 @@ void testDefaultConnectionMode() {
 	assert(config.persistentMaxRequestsPerHandle == 0);
 }
 
+void testHttpRequestStateMutationPolicy() {
+	constexpr int success = 0;
+	constexpr int notFound = 0x105;
+	constexpr int failure = -1;
+
+	assert(link_internal::linkHttpRequestStateMutationSucceeded(success, success, notFound));
+	assert(link_internal::linkHttpRequestStateMutationSucceeded(notFound, success, notFound));
+	assert(!link_internal::linkHttpRequestStateMutationSucceeded(failure, success, notFound));
+	assert(!link_internal::linkShouldScrubHttpClientRequest(false));
+	assert(link_internal::linkShouldScrubHttpClientRequest(true));
+}
+
 void testPersistentReuseDecisions() {
 	using Decision = link_internal::LinkPersistentReuseDecision;
 
@@ -79,6 +91,7 @@ void testPersistentOriginMatching() {
 
 int main() {
 	testDefaultConnectionMode();
+	testHttpRequestStateMutationPolicy();
 	testPersistentReuseDecisions();
 	testPersistentOriginMatching();
 	return 0;

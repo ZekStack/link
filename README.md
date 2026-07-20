@@ -137,7 +137,7 @@ Detailed documentation is available in the `docs/` folder.
 | [`docs/streaming.md`](docs/streaming.md) | Streaming downloads and cancellation. |
 | [`docs/memory.md`](docs/memory.md) | Bounded memory, ESP-IDF ranges, and explicit copy behavior. |
 | [`docs/persistent-http.md`](docs/persistent-http.md) | Optional per-worker persistent HTTP clients. |
-| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.1.0 qualification. |
+| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.1.1 qualification. |
 
 ## API overview
 
@@ -170,7 +170,7 @@ For the full API, see [`docs/api.md`](docs/api.md).
 | PSRAM | Payload buffers prefer PSRAM; worker stacks can optionally use PSRAM |
 | Dependencies | `bblanchon/ArduinoJson >= 7.0.0` |
 | Exceptions | Not used |
-| Status | `0.1.0` |
+| Status | `0.1.1` |
 
 ## Configuration
 

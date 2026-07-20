@@ -91,12 +91,6 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 			    "http method setup failed"
 			);
 		}
-		if (setupError.code == LinkErrorCode::Ok) {
-			setupError = link_internal_http::mapSetupError(
-			    esp_http_client_set_post_field(client, nullptr, 0),
-			    "http request body reset failed"
-			);
-		}
 		for (size_t i = 0; includeRequestHeaders && setupError.code == LinkErrorCode::Ok &&
 		                   i < request.headers.size();
 		     ++i) {
@@ -128,7 +122,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		LinkError transportError = setupError.code == LinkErrorCode::Ok
 		                               ? link_internal_http::mapEspError(err, client, currentUrl)
 		                               : setupError;
-		const bool scrubbed = scrubHttpClientRequest(client, request.headers, appliedHeaderCount);
+		const bool scrubbed = !link_internal::linkShouldScrubHttpClientRequest(persistent) ||
+		                      scrubHttpClientRequest(client, request.headers, appliedHeaderCount);
 
 		response.error =
 		    link_internal::linkPreserveOperationError(context->eventError, transportError);

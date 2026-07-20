@@ -30,6 +30,15 @@ enum class LinkPersistentReuseDecision : uint8_t {
 	Poisoned
 };
 
+inline bool
+linkHttpRequestStateMutationSucceeded(int result, int successResult, int alreadyClearResult) {
+	return result == successResult || result == alreadyClearResult;
+}
+
+inline bool linkShouldScrubHttpClientRequest(bool persistent) {
+	return persistent;
+}
+
 struct LinkRedirectDecision {
 	LinkRedirectAction action = LinkRedirectAction::None;
 	const char *location = nullptr;

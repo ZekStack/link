@@ -2,7 +2,7 @@
 
 A successful GitHub Actions run verifies host logic, source constraints, metadata, formatting, and compilation across the supported ESP32 targets. It does not replace physical-device qualification of FreeRTOS scheduling, network behavior, TLS reuse, or heap integrity.
 
-The following validation is required before publishing `v0.1.0`.
+The following validation is required before publishing `v0.1.1`.
 
 ## Automated release gates
 
@@ -13,6 +13,7 @@ The tagged commit must pass:
 - embedded source audit;
 - general host logic tests;
 - persistent-client host logic tests;
+- idempotent ESP-IDF request-state policy tests;
 - all examples under PIOArduino on ESP32, ESP32-S3, ESP32-C3, and ESP32-P4;
 - all examples under Arduino CLI on the same target families;
 - compilation of the concurrent lifecycle stress sketch;
@@ -50,6 +51,7 @@ Run a same-origin HTTPS workload in both connection modes for an extended period
 - HTTPS-to-HTTP downgrade rejection;
 - changing custom headers between requests;
 - alternating GET and body-bearing methods;
+- absent and changing `Content-Type` headers while request state is cleared;
 - idle and request-count eviction.
 
 Record at regular intervals:
@@ -82,6 +84,7 @@ Run at least one real HTTP and one verified HTTPS request on every hardware fami
 - cross-origin authorization headers are stripped;
 - final response limits are enforced;
 - large intermediate redirect bodies do not prevent an otherwise valid redirect.
+- fresh GET and JSON POST requests do not fail while clearing absent request state.
 
 ## Release evidence
 
@@ -94,4 +97,4 @@ Attach the following to the release pull request or a linked issue:
 - heap and stack measurements;
 - any known limitations or deviations.
 
-Do not tag `v0.1.0` until the automated gates and physical qualification are both complete.
+Do not tag `v0.1.1` until the automated gates and physical qualification are both complete.

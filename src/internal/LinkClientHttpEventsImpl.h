@@ -99,6 +99,15 @@ bool LinkClient<CallbackStorageSize>::scrubHttpClientRequest(
     esp_http_client_handle_t client, const LinkHeaders &headers, size_t appliedHeaderCount
 ) {
 	bool clean = true;
+	// ESP-IDF clears Content-Type with the POST field and reports not-found when it is absent.
+	const esp_err_t bodyResult = esp_http_client_set_post_field(client, nullptr, 0);
+	if (!link_internal::linkHttpRequestStateMutationSucceeded(
+	        bodyResult,
+	        ESP_OK,
+	        ESP_ERR_NOT_FOUND
+	    )) {
+		clean = false;
+	}
 	for (size_t i = 0; i < appliedHeaderCount; ++i) {
 		const char *headerName = headers.nameAt(i);
 		if (headerName == nullptr) {
@@ -119,12 +128,16 @@ bool LinkClient<CallbackStorageSize>::scrubHttpClientRequest(
 				break;
 			}
 		}
-		if (!alreadyDeleted && esp_http_client_delete_header(client, headerName) != ESP_OK) {
-			clean = false;
+		if (!alreadyDeleted) {
+			const esp_err_t headerResult = esp_http_client_delete_header(client, headerName);
+			if (!link_internal::linkHttpRequestStateMutationSucceeded(
+			        headerResult,
+			        ESP_OK,
+			        ESP_ERR_NOT_FOUND
+			    )) {
+				clean = false;
+			}
 		}
-	}
-	if (esp_http_client_set_post_field(client, nullptr, 0) != ESP_OK) {
-		clean = false;
 	}
 	return clean;
 }
