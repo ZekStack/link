@@ -18,6 +18,14 @@ JSON response parsing is bounded by:
 
 If the HTTP body exceeds the response body limit, Link returns `ResponseTooLarge`. If the buffered body fits but cannot be parsed as JSON or exceeds the serialized JSON limit, Link returns `JsonParseFailed`.
 
-`maxSerializedJsonSize` limits the serialized input bytes passed to ArduinoJson. It does not cap the heap used by the parsed `JsonDocument`; parsed nodes and copied strings add structure-dependent overhead. Peak response memory includes both the buffered input and the parsed document.
+## Allocation policy
 
-`LinkJsonResponse::json` is valid only during the callback unless copied by the user.
+A caller-provided request `JsonDocument` remains caller-owned. Link reads and serializes that document during submission but does not replace its allocator.
+
+A parsed response document is different: `LinkJsonResponse::json` is created by Link, so v0.2.0 constructs it with `Strata::ArduinoJson::Allocator` using `LinkConfig::memory.allocation`.
+
+This means parsed ArduinoJson nodes and copied strings follow the same Strata placement policy as Link-owned response buffers and headers.
+
+`maxSerializedJsonSize` is still a serialized byte limit rather than a fixed cap on parsed-document memory. Peak JSON response memory includes the buffered serialized body plus structure-dependent ArduinoJson allocations; both Link-owned domains now follow Strata placement.
+
+`LinkJsonResponse::json` is valid only during the callback unless copied by the application.
