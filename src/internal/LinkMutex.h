@@ -3,8 +3,7 @@
 #include <Arduino.h>
 
 #if defined(ESP32)
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
+#include <strata/freertos/Mutex.h>
 #else
 using TickType_t = uint32_t;
 constexpr TickType_t portMAX_DELAY = 0xffffffffu;
@@ -14,15 +13,7 @@ class LinkMutex {
   public:
 	LinkMutex() {
 #if defined(ESP32)
-		_handle = xSemaphoreCreateRecursiveMutex();
-#endif
-	}
-
-	~LinkMutex() {
-#if defined(ESP32)
-		if (_handle != nullptr) {
-			vSemaphoreDelete(_handle);
-		}
+		_mutex = Strata::FreeRTOS::RecursiveMutex::create();
 #endif
 	}
 
@@ -31,7 +22,7 @@ class LinkMutex {
 
 	bool lock(TickType_t timeout = portMAX_DELAY) {
 #if defined(ESP32)
-		return _handle != nullptr && xSemaphoreTakeRecursive(_handle, timeout) == pdTRUE;
+		return _mutex.lock(timeout);
 #else
 		(void)timeout;
 		return true;
@@ -40,15 +31,13 @@ class LinkMutex {
 
 	void unlock() {
 #if defined(ESP32)
-		if (_handle != nullptr) {
-			xSemaphoreGiveRecursive(_handle);
-		}
+		_mutex.unlock();
 #endif
 	}
 
 	bool ready() const {
 #if defined(ESP32)
-		return _handle != nullptr;
+		return _mutex.valid();
 #else
 		return true;
 #endif
@@ -56,7 +45,7 @@ class LinkMutex {
 
   private:
 #if defined(ESP32)
-	SemaphoreHandle_t _handle = nullptr;
+	Strata::FreeRTOS::RecursiveMutex _mutex;
 #endif
 };
 
