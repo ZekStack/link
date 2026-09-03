@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -151,7 +150,28 @@ class LinkBody;
 class LinkBodyView;
 namespace link_internal {
 LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, LinkBody &out);
+
+#if defined(ESP32)
+inline ::ArduinoJson::Allocator *linkJsonAllocator(Strata::Placement placement) {
+	static Strata::ArduinoJson::Allocator defaultAllocator(Strata::Placement::Default);
+	static Strata::ArduinoJson::Allocator internalAllocator(Strata::Placement::Internal);
+	static Strata::ArduinoJson::Allocator preferExternalAllocator(Strata::Placement::PreferExternal);
+	static Strata::ArduinoJson::Allocator requireExternalAllocator(Strata::Placement::RequireExternal);
+
+	switch (placement) {
+	case Strata::Placement::Default:
+		return &defaultAllocator;
+	case Strata::Placement::Internal:
+		return &internalAllocator;
+	case Strata::Placement::PreferExternal:
+		return &preferExternalAllocator;
+	case Strata::Placement::RequireExternal:
+		return &requireExternalAllocator;
+	}
+	return &defaultAllocator;
 }
+#endif
+} // namespace link_internal
 
 class LinkHeaders {
   public:
@@ -325,7 +345,8 @@ struct LinkJsonResponse {
 
 	LinkJsonResponse() = default;
 #if defined(ESP32)
-	explicit LinkJsonResponse(::ArduinoJson::Allocator *allocator) : json(allocator) {
+	explicit LinkJsonResponse(Strata::Placement placement)
+	    : json(link_internal::linkJsonAllocator(placement)) {
 	}
 #endif
 
@@ -790,7 +811,6 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 #if defined(ESP32)
 	Strata::FreeRTOS::Queue<WorkerSignal> _dispatchQueue;
-	std::optional<Strata::ArduinoJson::Allocator> _jsonAllocator;
 #endif
 };
 
