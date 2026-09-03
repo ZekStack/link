@@ -1,5 +1,8 @@
 template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &config) const {
+	if (!Strata::validMemoryPolicy(config.memory)) {
+		return LinkResult::error(LinkErrorCode::InvalidConfig, "memory policy is invalid");
+	}
 	if (config.queueSize == 0 || config.maxConcurrentRequests == 0) {
 		return LinkResult::error(
 		    LinkErrorCode::InvalidConfig,
@@ -59,14 +62,6 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 }
 
 template <size_t CallbackStorageSize>
-bool LinkClient<CallbackStorageSize>::shouldUsePsramStack() const {
-	if (_config.stackType == LinkStackType::Psram) {
-		return true;
-	}
-	return _config.stackType == LinkStackType::Auto && link_task_support::hasExternalStackSupport();
-}
-
-template <size_t CallbackStorageSize>
 LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 	{
 		LinkLock lock(_mutex);
@@ -105,18 +100,20 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		_state = LinkState::Starting;
 		_config = config;
 		_diagnostics = LinkDiagnostics{};
-		_slots = new (std::nothrow) QueuedRequest[config.queueSize];
-		_slotUsed = new (std::nothrow) bool[config.queueSize];
-		_queue = new (std::nothrow) size_t[config.queueSize];
-		_workers = new (std::nothrow) WorkerRecord[config.maxConcurrentRequests];
-		if (_slots == nullptr || _slotUsed == nullptr || _queue == nullptr || _workers == nullptr) {
-			delete[] _slots;
-			delete[] _slotUsed;
-			delete[] _queue;
-			delete[] _workers;
+		_diagnostics.allocationPlacement = config.memory.allocation;
+		_diagnostics.workerStackPlacement = config.memory.taskStack;
+		_slots = link_memory::allocateArray<QueuedRequest>(config.queueSize, config.memory.allocation);
+		_slotUsed = link_memory::allocateArray<bool>(config.queueSize, config.memory.allocation);
+		_workers = link_memory::allocateArray<WorkerRecord>(
+		    config.maxConcurrentRequests,
+		    config.memory.allocation
+		);
+		if (_slots == nullptr || _slotUsed == nullptr || _workers == nullptr) {
+			link_memory::releaseArray(_slots, config.queueSize);
+			link_memory::releaseArray(_slotUsed, config.queueSize);
+			link_memory::releaseArray(_workers, config.maxConcurrentRequests);
 			_slots = nullptr;
 			_slotUsed = nullptr;
-			_queue = nullptr;
 			_workers = nullptr;
 			_config = LinkConfig{};
 			_state = LinkState::Uninitialized;
@@ -125,13 +122,11 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			    "link storage allocation failed"
 			);
 		}
+		_diagnostics.requestSlotRegion = Strata::regionOf(_slots);
+		_diagnostics.workerStorageRegion = Strata::regionOf(_workers);
 		for (size_t i = 0; i < config.queueSize; ++i) {
 			_slotUsed[i] = false;
-			_queue[i] = 0;
 		}
-		_queueHead = 0;
-		_queueTail = 0;
-		_queueCount = 0;
 		_nextRequestId = 1;
 		_stopWakeIssued = false;
 	}
@@ -145,52 +140,62 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		    "worker signal capacity is too large"
 		);
 	}
-	SemaphoreHandle_t items = xSemaphoreCreateCounting(signalCapacity, 0);
-	if (items == nullptr) {
+	_dispatchQueue = Strata::FreeRTOS::Queue<WorkerSignal>::create(
+	    Strata::FreeRTOS::QueueConfig{
+	        .length = static_cast<size_t>(signalCapacity),
+	        .storagePlacement = config.memory.allocation,
+	        .usage = Strata::FreeRTOS::QueueUsage::TaskOnly,
+	    }
+	);
+	if (!_dispatchQueue) {
 		forceDeinitBlocking();
-		return LinkResult::error(LinkErrorCode::AllocationFailed, "link queue semaphore failed");
+		return LinkResult::error(LinkErrorCode::AllocationFailed, "link dispatch queue failed");
 	}
+	_jsonAllocator.emplace(config.memory.allocation);
 	{
 		LinkLock lock(_mutex);
 		if (!lock) {
-			vSemaphoreDelete(items);
 			forceDeinitBlocking();
 			return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 		}
-		_items = items;
+		_diagnostics.dispatchQueueStorageRegion = _dispatchQueue.storageRegion();
 	}
 
 	for (size_t i = 0; i < config.maxConcurrentRequests; ++i) {
+		WorkerRecord &worker = _workers[i];
 		{
 			LinkLock lock(_mutex);
 			if (!lock) {
 				forceDeinitBlocking();
 				return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
 			}
-			_workers[i].owner = this;
-			_workers[i].index = i;
-			_workers[i].active = true;
-			_workers[i].http.eventContext.owner = this;
+			worker.owner = this;
+			worker.index = i;
+			worker.active = true;
+			worker.readyForDelete = false;
+			worker.http.originHost.setPlacement(config.memory.allocation);
+			worker.http.eventContext.owner = this;
+			worker.http.eventContext.streamInfo.headers.configurePlacement(config.memory.allocation);
 		}
 
 		char name[16]{};
 		snprintf(name, sizeof(name), "link-%u", static_cast<unsigned>(i));
-		const BaseType_t created = link_task_support::createTask(
+		worker.task = Strata::FreeRTOS::Task::create(
 		    &LinkClient::taskEntry,
-		    name,
-		    config.stackSizeBytes,
-		    &_workers[i],
-		    config.priority,
-		    &_workers[i].handle,
-		    config.coreId,
-		    shouldUsePsramStack(),
-		    _workers[i].createdWithCaps
+		    &worker,
+		    Strata::FreeRTOS::TaskConfig{
+		        .name = name,
+		        .stackBytes = config.stackSizeBytes,
+		        .stackPlacement = config.memory.taskStack,
+		        .priority = config.priority,
+		        .affinity = static_cast<int32_t>(config.coreId),
+		    }
 		);
-		if (created != pdPASS) {
+		if (!worker.task) {
 			{
 				LinkLock lock(_mutex);
 				if (lock) {
-					_workers[i].active = false;
+					worker.active = false;
 					_state = LinkState::Stopping;
 				}
 			}
@@ -199,6 +204,22 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			    LinkErrorCode::AllocationFailed,
 			    "worker task creation failed"
 			);
+		}
+		{
+			LinkLock lock(_mutex);
+			if (lock) {
+				switch (worker.task.stackRegion()) {
+				case Strata::Region::Internal:
+					_diagnostics.workerStacksInternal++;
+					break;
+				case Strata::Region::External:
+					_diagnostics.workerStacksExternal++;
+					break;
+				case Strata::Region::Unknown:
+					_diagnostics.workerStacksUnknown++;
+					break;
+				}
+			}
 		}
 	}
 #endif
@@ -235,13 +256,18 @@ template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::mark
 
 template <size_t CallbackStorageSize> void LinkClient<CallbackStorageSize>::wakeWorkers() {
 #if defined(ESP32)
-	LinkLock lock(_mutex);
-	if (!lock || _stopWakeIssued || _items == nullptr) {
-		return;
+	size_t workerCount = 0;
+	{
+		LinkLock lock(_mutex);
+		if (!lock || _stopWakeIssued || !_dispatchQueue) {
+			return;
+		}
+		_stopWakeIssued = true;
+		workerCount = _config.maxConcurrentRequests;
 	}
-	_stopWakeIssued = true;
-	for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
-		(void)xSemaphoreGive(_items);
+	const WorkerSignal stopSignal{0, true};
+	for (size_t i = 0; i < workerCount; ++i) {
+		(void)_dispatchQueue.send(stopSignal, portMAX_DELAY);
 	}
 #endif
 }
@@ -256,18 +282,31 @@ LinkResult LinkClient<CallbackStorageSize>::waitForWorkers(bool waitForever) {
 	const uint32_t started = millis();
 	while (true) {
 		bool workersRunning = false;
-		{
-			LinkLock lock(_mutex);
-			if (!lock) {
-				return LinkResult::error(LinkErrorCode::InternalError, "link mutex lock failed");
-			}
-			if (_workers != nullptr) {
-				for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
+		bool ownedTasksRemain = false;
+		if (_workers != nullptr) {
+			for (size_t i = 0; i < _config.maxConcurrentRequests; ++i) {
+				bool readyForDelete = false;
+				{
+					LinkLock lock(_mutex);
+					if (!lock) {
+						return LinkResult::error(
+						    LinkErrorCode::InternalError,
+						    "link mutex lock failed"
+						);
+					}
 					workersRunning = workersRunning || _workers[i].active;
+					readyForDelete = _workers[i].readyForDelete;
+					if (readyForDelete) {
+						_workers[i].readyForDelete = false;
+					}
 				}
+				if (readyForDelete) {
+					_workers[i].task.reset();
+				}
+				ownedTasksRemain = ownedTasksRemain || _workers[i].task.valid();
 			}
 		}
-		if (!workersRunning) {
+		if (!workersRunning && !ownedTasksRemain) {
 			return LinkResult::ok();
 		}
 		if (!waitForever && static_cast<uint32_t>(millis() - started) >= timeoutMs) {
@@ -290,23 +329,23 @@ LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
 	if (_state == LinkState::Uninitialized) {
 		return LinkResult::ok();
 	}
+	const size_t queueSize = _config.queueSize;
+	const size_t workerCount = _config.maxConcurrentRequests;
 #if defined(ESP32)
-	if (_items != nullptr) {
-		vSemaphoreDelete(_items);
-		_items = nullptr;
+	_dispatchQueue.reset();
+	_jsonAllocator.reset();
+	if (_workers != nullptr) {
+		for (size_t i = 0; i < workerCount; ++i) {
+			_workers[i].task.reset();
+		}
 	}
 #endif
-	delete[] _slots;
-	delete[] _slotUsed;
-	delete[] _queue;
-	delete[] _workers;
+	link_memory::releaseArray(_slots, queueSize);
+	link_memory::releaseArray(_slotUsed, queueSize);
+	link_memory::releaseArray(_workers, workerCount);
 	_slots = nullptr;
 	_slotUsed = nullptr;
-	_queue = nullptr;
 	_workers = nullptr;
-	_queueHead = 0;
-	_queueTail = 0;
-	_queueCount = 0;
 	_stopWakeIssued = false;
 	_config = LinkConfig{};
 	_state = LinkState::Uninitialized;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstddef>
-#include <new>
+#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -52,19 +52,24 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 			return false;
 		} else {
 			reset();
-			new (&_storage) CallableType(std::move(callable));
+			std::construct_at(storageAs<CallableType>(), std::move(callable));
 			_invoke = [](void *storage, Args... args) -> ReturnType {
-				return (*reinterpret_cast<CallableType *>(storage))(std::forward<Args>(args)...);
+				return (*static_cast<CallableType *>(storage))(std::forward<Args>(args)...);
 			};
 			_copy = [](void *destination, const void *source) {
-				new (destination) CallableType(*reinterpret_cast<const CallableType *>(source));
+				std::construct_at(
+				    static_cast<CallableType *>(destination),
+				    *static_cast<const CallableType *>(source)
+				);
 			};
 			_move = [](void *destination, void *source) {
-				new (destination)
-				    CallableType(std::move(*reinterpret_cast<CallableType *>(source)));
+				std::construct_at(
+				    static_cast<CallableType *>(destination),
+				    std::move(*static_cast<CallableType *>(source))
+				);
 			};
 			_destroy = [](void *storage) {
-				reinterpret_cast<CallableType *>(storage)->~CallableType();
+				std::destroy_at(static_cast<CallableType *>(storage));
 			};
 			return true;
 		}
@@ -141,6 +146,10 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 	using Copy = void (*)(void *, const void *);
 	using Move = void (*)(void *, void *);
 	using Destroy = void (*)(void *);
+
+	template <typename T> T *storageAs() {
+		return reinterpret_cast<T *>(&_storage);
+	}
 
 	void copyFrom(const LinkCallback &other) {
 		if (other._copy == nullptr) {

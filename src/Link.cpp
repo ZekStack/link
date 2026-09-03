@@ -93,10 +93,7 @@ const char *linkStateToString(LinkState state) {
 }
 
 LinkHeaders::~LinkHeaders() {
-	clear();
-	delete[] _entries;
-	_entries = nullptr;
-	_capacity = 0;
+	releaseStorage();
 }
 
 LinkHeaders::LinkHeaders(LinkHeaders &&other) noexcept {
@@ -105,8 +102,7 @@ LinkHeaders::LinkHeaders(LinkHeaders &&other) noexcept {
 
 LinkHeaders &LinkHeaders::operator=(LinkHeaders &&other) noexcept {
 	if (this != &other) {
-		clear();
-		delete[] _entries;
+		releaseStorage();
 		moveFrom(other);
 	}
 	return *this;
@@ -122,6 +118,16 @@ void LinkHeaders::configureLimits(
 	_maxHeaderNameSize = maxHeaderNameSize;
 	_maxHeaderValueSize = maxHeaderValueSize;
 	_maxTotalHeaderSize = maxTotalHeaderSize;
+}
+
+void LinkHeaders::configurePlacement(Strata::Placement placement) {
+	if (_entries == nullptr) {
+		_placement = placement;
+	}
+}
+
+Strata::Placement LinkHeaders::placement() const {
+	return _placement;
 }
 
 LinkResult LinkHeaders::add(const char *name, const char *value) {
@@ -200,6 +206,13 @@ void LinkHeaders::clear() {
 	_totalSize = 0;
 }
 
+void LinkHeaders::releaseStorage() {
+	clear();
+	link_memory::releaseArray(_entries, _capacity);
+	_entries = nullptr;
+	_capacity = 0;
+}
+
 bool LinkHeaders::namesEqual(const char *left, const char *right) {
 	if (left == nullptr || right == nullptr) {
 		return false;
@@ -247,7 +260,7 @@ LinkResult LinkHeaders::ensureStorage() {
 	if (_maxHeaderCount == 0) {
 		return LinkResult::error(LinkErrorCode::TooManyHeaders, "header count limit is zero");
 	}
-	_entries = new (std::nothrow) Entry[_maxHeaderCount];
+	_entries = link_memory::allocateArray<Entry>(_maxHeaderCount, _placement);
 	if (_entries == nullptr) {
 		return LinkResult::error(
 		    LinkErrorCode::AllocationFailed,
@@ -283,8 +296,9 @@ LinkResult LinkHeaders::validate(const char *name, const char *value, size_t rep
 bool LinkHeaders::copyEntry(Entry &entry, const char *name, const char *value) {
 	const size_t nameSize = safeLength(name);
 	const size_t valueSize = safeLength(value);
-	entry.name = link_memory::duplicateString(name, nameSize);
-	entry.value = link_memory::duplicateString(value != nullptr ? value : "", valueSize);
+	entry.name = link_memory::duplicateString(name, nameSize, _placement);
+	entry.value =
+	    link_memory::duplicateString(value != nullptr ? value : "", valueSize, _placement);
 	if (entry.name == nullptr || entry.value == nullptr) {
 		freeEntry(entry);
 		return false;
@@ -312,6 +326,7 @@ void LinkHeaders::moveFrom(LinkHeaders &other) {
 	_maxHeaderNameSize = other._maxHeaderNameSize;
 	_maxHeaderValueSize = other._maxHeaderValueSize;
 	_maxTotalHeaderSize = other._maxTotalHeaderSize;
+	_placement = other._placement;
 
 	other._entries = nullptr;
 	other._count = 0;
@@ -323,10 +338,7 @@ LinkResult LinkHeaders::copyFrom(const LinkHeaders &other) {
 	if (this == &other) {
 		return LinkResult::ok();
 	}
-	clear();
-	delete[] _entries;
-	_entries = nullptr;
-	_capacity = 0;
+	releaseStorage();
 	configureLimits(
 	    other._maxHeaderCount,
 	    other._maxHeaderNameSize,
@@ -476,6 +488,7 @@ LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, 
 	}
 
 	out.clear();
+	out._buffer.setPlacement(config.memory.allocation);
 	out._type = view.type();
 	bool allocated = true;
 	switch (view.type()) {

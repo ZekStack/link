@@ -1,15 +1,15 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Strata.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <new>
-
-#if defined(ESP32)
-#include <esp_heap_caps.h>
-#endif
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 namespace link_memory {
 
@@ -26,51 +26,47 @@ inline void testFailAllocationsAfter(size_t successfulAllocations) {
 inline void testResetAllocationFailures() {
 	testAllocationBudget() = std::numeric_limits<size_t>::max();
 }
-#endif
 
-inline void *allocate(size_t bytes, bool preferPsram = true) {
-	if (bytes == 0) {
-		return nullptr;
-	}
-#if defined(ESP32) && defined(MALLOC_CAP_8BIT)
-	void *memory = nullptr;
-	if (preferPsram) {
-#if defined(MALLOC_CAP_SPIRAM)
-		memory = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#endif
-	}
-	if (memory == nullptr) {
-		memory = heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
-	}
-	return memory;
-#else
-	(void)preferPsram;
-#if !defined(ESP32)
+inline bool consumeTestAllocation() {
 	size_t &budget = testAllocationBudget();
 	if (budget == 0) {
-		return nullptr;
+		return false;
 	}
 	if (budget != std::numeric_limits<size_t>::max()) {
 		budget--;
 	}
+	return true;
+}
 #endif
-	return ::operator new(bytes, std::nothrow);
+
+inline void *allocate(
+    size_t bytes,
+    Strata::Placement placement = Strata::Placement::PreferExternal
+) {
+	if (bytes == 0) {
+		return nullptr;
+	}
+#if !defined(ESP32)
+	if (!consumeTestAllocation()) {
+		return nullptr;
+	}
 #endif
+	return Strata::allocate(bytes, placement);
 }
 
 inline void release(void *memory) {
-	if (memory == nullptr) {
-		return;
-	}
-#if defined(ESP32)
-	heap_caps_free(memory);
-#else
-	::operator delete(memory);
-#endif
+	Strata::free(memory);
 }
 
-inline char *duplicateString(const char *value, size_t length, bool preferPsram = true) {
-	char *copy = static_cast<char *>(allocate(length + 1, preferPsram));
+inline char *duplicateString(
+    const char *value,
+    size_t length,
+    Strata::Placement placement = Strata::Placement::PreferExternal
+) {
+	if (length == std::numeric_limits<size_t>::max()) {
+		return nullptr;
+	}
+	char *copy = static_cast<char *>(allocate(length + 1, placement));
 	if (copy == nullptr) {
 		return nullptr;
 	}
@@ -81,11 +77,52 @@ inline char *duplicateString(const char *value, size_t length, bool preferPsram 
 	return copy;
 }
 
+template <typename T>
+T *allocateArray(size_t count, Strata::Placement placement) {
+	static_assert(std::is_nothrow_default_constructible_v<T>);
+	static_assert(std::is_nothrow_destructible_v<T>);
+	if (count == 0 || count > std::numeric_limits<size_t>::max() / sizeof(T)) {
+		return nullptr;
+	}
+#if !defined(ESP32)
+	if (!consumeTestAllocation()) {
+		return nullptr;
+	}
+#endif
+	void *storage = Strata::allocate(Strata::AllocationRequest{
+	    .sizeBytes = count * sizeof(T),
+	    .placement = placement,
+	    .alignment = alignof(T),
+	});
+	if (storage == nullptr) {
+		return nullptr;
+	}
+	T *items = static_cast<T *>(storage);
+	for (size_t i = 0; i < count; ++i) {
+		std::construct_at(items + i);
+	}
+	return items;
+}
+
+template <typename T> void releaseArray(T *items, size_t count) {
+	if (items == nullptr) {
+		return;
+	}
+	for (size_t i = 0; i < count; ++i) {
+		std::destroy_at(items + i);
+	}
+	Strata::free(items);
+}
+
 } // namespace link_memory
 
 class LinkOwnedBuffer {
   public:
-	LinkOwnedBuffer() = default;
+	explicit LinkOwnedBuffer(
+	    Strata::Placement placement = Strata::Placement::PreferExternal
+	) noexcept
+	    : _placement(placement) {
+	}
 
 	~LinkOwnedBuffer() {
 		clear();
@@ -106,7 +143,21 @@ class LinkOwnedBuffer {
 		return *this;
 	}
 
-	bool assign(const uint8_t *data, size_t size, bool preferPsram = true) {
+	void setPlacement(Strata::Placement placement) {
+		if (_data == nullptr) {
+			_placement = placement;
+		}
+	}
+
+	Strata::Placement placement() const {
+		return _placement;
+	}
+
+	Strata::Region region() const {
+		return Strata::regionOf(_data);
+	}
+
+	bool assign(const uint8_t *data, size_t size) {
 		clear();
 		if (size == 0) {
 			return true;
@@ -114,7 +165,7 @@ class LinkOwnedBuffer {
 		if (data == nullptr) {
 			return false;
 		}
-		_data = static_cast<uint8_t *>(link_memory::allocate(size, preferPsram));
+		_data = static_cast<uint8_t *>(link_memory::allocate(size, _placement));
 		if (_data == nullptr) {
 			return false;
 		}
@@ -125,13 +176,15 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
-	bool assignText(const char *value, size_t size, bool preferPsram = true) {
+	bool assignText(const char *value, size_t size) {
 		clear();
 		if (value == nullptr) {
 			value = "";
 			size = 0;
 		}
-		_data = reinterpret_cast<uint8_t *>(link_memory::duplicateString(value, size, preferPsram));
+		_data = reinterpret_cast<uint8_t *>(
+		    link_memory::duplicateString(value, size, _placement)
+		);
 		if (_data == nullptr) {
 			return false;
 		}
@@ -141,7 +194,7 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
-	bool allocateForWrite(size_t size, bool nulTerminate, bool preferPsram = true) {
+	bool allocateForWrite(size_t size, bool nulTerminate) {
 		clear();
 		const size_t capacity = size + (nulTerminate ? 1 : 0);
 		if (capacity < size) {
@@ -150,7 +203,7 @@ class LinkOwnedBuffer {
 		if (capacity == 0) {
 			return true;
 		}
-		_data = static_cast<uint8_t *>(link_memory::allocate(capacity, preferPsram));
+		_data = static_cast<uint8_t *>(link_memory::allocate(capacity, _placement));
 		if (_data == nullptr) {
 			return false;
 		}
@@ -163,11 +216,11 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
-	bool reserve(size_t capacity, bool preferPsram = true) {
+	bool reserve(size_t capacity) {
 		if (capacity <= _capacity) {
 			return true;
 		}
-		uint8_t *next = static_cast<uint8_t *>(link_memory::allocate(capacity, preferPsram));
+		uint8_t *next = static_cast<uint8_t *>(link_memory::allocate(capacity, _placement));
 		if (next == nullptr) {
 			return false;
 		}
@@ -183,11 +236,10 @@ class LinkOwnedBuffer {
 		return true;
 	}
 
-	bool
-	append(const uint8_t *data, size_t size, bool nulTerminate = false, bool preferPsram = true) {
+	bool append(const uint8_t *data, size_t size, bool nulTerminate = false) {
 		if (size == 0) {
 			if (nulTerminate && _data == nullptr) {
-				return assignText("", 0, preferPsram);
+				return assignText("", 0);
 			}
 			return true;
 		}
@@ -195,10 +247,11 @@ class LinkOwnedBuffer {
 			return false;
 		}
 		const size_t extra = nulTerminate ? 1 : 0;
-		const size_t required = _size + size + extra;
-		if (required < _size || required < size) {
+		if (_size > std::numeric_limits<size_t>::max() - size ||
+		    _size + size > std::numeric_limits<size_t>::max() - extra) {
 			return false;
 		}
+		const size_t required = _size + size + extra;
 		size_t nextCapacity = _capacity == 0 ? required : _capacity;
 		while (nextCapacity < required) {
 			const size_t grown = nextCapacity * 2;
@@ -208,7 +261,7 @@ class LinkOwnedBuffer {
 			}
 			nextCapacity = grown;
 		}
-		if (!reserve(nextCapacity, preferPsram)) {
+		if (!reserve(nextCapacity)) {
 			return false;
 		}
 		std::memcpy(_data + _size, data, size);
@@ -272,6 +325,7 @@ class LinkOwnedBuffer {
 		_size = other._size;
 		_capacity = other._capacity;
 		_nulTerminated = other._nulTerminated;
+		_placement = other._placement;
 		other._data = nullptr;
 		other._size = 0;
 		other._capacity = 0;
@@ -282,5 +336,6 @@ class LinkOwnedBuffer {
 	size_t _size = 0;
 	size_t _capacity = 0;
 	bool _nulTerminated = false;
+	Strata::Placement _placement = Strata::Placement::PreferExternal;
 	inline static uint8_t _empty[1] = {0};
 };

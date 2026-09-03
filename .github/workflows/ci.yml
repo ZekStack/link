@@ -15,6 +15,7 @@ env:
   PIOARDUINO_PLATFORM_URL: https://github.com/pioarduino/platform-espressif32/releases/download/55.03.39/platform-espressif32.zip
   PIOARDUINO_PLATFORM_VERSION: 55.03.39
   PIOARDUINO_VERSION: 6.1.19
+  STRATA_VERSION: v0.1.2
 
 jobs:
   metadata:
@@ -48,12 +49,29 @@ jobs:
 
       - name: Audit production sources
         run: |
+          set -e
           if grep -RInE '(^|[^[:alnum:]_])throw([^[:alnum:]_]|$)|std::abort[[:space:]]*\(|std::vector|std::string|std::function' src; then
             echo "Embedded safety audit failed"
             exit 1
           fi
           if grep -RInE '#include[[:space:]]+[<"](Fresh|Pulse|Signal|Tempo|Trace|Worker|Vault|Courier|Phase|Flow|Lingo)\.h[>"]' src; then
             echo "Embedded safety audit failed: Link must not depend on other ZekStack libraries"
+            exit 1
+          fi
+          if grep -RInE 'heap_caps_|MALLOC_CAP_|esp_heap_caps|ps_malloc[[:space:]]*\(' src; then
+            echo "Link allocation placement must go through Strata"
+            exit 1
+          fi
+          if grep -RInE '(^|[^[:alnum:]_:])(malloc|calloc|realloc|free)[[:space:]]*\(|std::make_(unique|shared)[[:space:]]*<|(^|[^[:alnum:]_:])new[[:space:]]|(^|[^[:alnum:]_:])delete[[:space:]]' src; then
+            echo "Link owned allocations must go through Strata"
+            exit 1
+          fi
+          if grep -RInE 'xTaskCreate[A-Za-z]*[[:space:]]*\(|vTaskDelete[A-Za-z]*[[:space:]]*\(|xQueueCreate[A-Za-z]*[[:space:]]*\(|xSemaphoreCreate[A-Za-z]*[[:space:]]*\(' src; then
+            echo "Link FreeRTOS ownership must go through Strata"
+            exit 1
+          fi
+          if grep -RInE '#include[[:space:]]+[<"]esp_heap_caps\.h[>"]|freertos/idf_additions\.h' src; then
+            echo "Link must not depend on ESP-IDF allocation internals"
             exit 1
           fi
 
@@ -64,15 +82,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch Strata
+        run: git clone --depth 1 --branch "${STRATA_VERSION}" https://github.com/ZekStack/strata.git "${RUNNER_TEMP}/strata"
+
       - name: Build and run host logic tests
         run: |
-          g++ -std=c++20 -Wall -Wextra -pedantic \
-            -Itests/host/stubs \
-            -Isrc \
-            src/Link.cpp \
-            tests/host/test_link.cpp \
-            -o /tmp/link-host-tests
+          set -e
+          build_host_test() {
+            source_file="$1"
+            output_file="$2"
+            g++ -std=c++20 -Wall -Wextra -pedantic \
+              -Itests/host/stubs \
+              -Isrc \
+              -I"${RUNNER_TEMP}/strata/src" \
+              src/Link.cpp \
+              "${RUNNER_TEMP}/strata/src/strata/Allocation.cpp" \
+              "${RUNNER_TEMP}/strata/src/strata/Diagnostics.cpp" \
+              "${RUNNER_TEMP}/strata/src/strata/internal/PlatformGeneric.cpp" \
+              "$source_file" \
+              -o "$output_file"
+          }
+
+          build_host_test tests/host/test_link.cpp /tmp/link-host-tests
           /tmp/link-host-tests
+          build_host_test tests/host/test_strata_policy.cpp /tmp/link-strata-policy-tests
+          /tmp/link-strata-policy-tests
 
   persistent-host-tests:
     runs-on: [self-hosted, zekstack-ci]
@@ -81,11 +115,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch Strata
+        run: git clone --depth 1 --branch "${STRATA_VERSION}" https://github.com/ZekStack/strata.git "${RUNNER_TEMP}/strata"
+
       - name: Build and run persistent-client logic tests
         run: |
           g++ -std=c++20 -Wall -Wextra -pedantic \
             -Itests/host/stubs \
             -Isrc \
+            -I"${RUNNER_TEMP}/strata/src" \
+            "${RUNNER_TEMP}/strata/src/strata/Allocation.cpp" \
+            "${RUNNER_TEMP}/strata/src/strata/Diagnostics.cpp" \
+            "${RUNNER_TEMP}/strata/src/strata/internal/PlatformGeneric.cpp" \
             tests/host/test_persistent.cpp \
             -o /tmp/link-persistent-host-tests
           /tmp/link-persistent-host-tests
@@ -122,6 +163,9 @@ jobs:
       - name: Install PIOArduino ESP32 Platform
         run: pio pkg install -g -p "${PIOARDUINO_PLATFORM_URL}"
 
+      - name: Fetch Strata
+        run: git clone --depth 1 --branch "${STRATA_VERSION}" https://github.com/ZekStack/strata.git "${RUNNER_TEMP}/strata"
+
       - name: Build library examples against ArduinoJson 7.0.0
         run: |
           set -e
@@ -131,6 +175,7 @@ jobs:
               pio ci "$d" \
                 --board ${{ matrix.board }} \
                 --lib="." \
+                --lib="${RUNNER_TEMP}/strata" \
                 --project-option "platform=${PIOARDUINO_PLATFORM_URL}" \
                 --project-option "lib_deps=bblanchon/ArduinoJson@7.0.0" \
                 --project-option "build_unflags=-std=gnu++11" \
@@ -144,6 +189,7 @@ jobs:
           pio ci tests/esp32/shutdown-stress \
             --board esp32dev \
             --lib="." \
+            --lib="${RUNNER_TEMP}/strata" \
             --project-option "platform=${PIOARDUINO_PLATFORM_URL}" \
             --project-option "lib_deps=bblanchon/ArduinoJson@7.0.0" \
             --project-option "build_unflags=-std=gnu++11" \
@@ -191,12 +237,16 @@ jobs:
       - name: Install latest ArduinoJson v7
         run: arduino-cli lib install ArduinoJson
 
-      - name: Add local library to sketchbook
+      - name: Add local libraries to sketchbook
         run: |
           set -e
           SKETCHBOOK_DIR="${HOME}/Arduino"
           mkdir -p "$SKETCHBOOK_DIR/libraries/Link"
           rsync -a --delete --exclude ".git" ./ "$SKETCHBOOK_DIR/libraries/Link/"
+          rm -rf "$SKETCHBOOK_DIR/libraries/Strata"
+          git clone --depth 1 --branch "${STRATA_VERSION}" \
+            https://github.com/ZekStack/strata.git \
+            "$SKETCHBOOK_DIR/libraries/Strata"
 
       - name: Build examples (${{ matrix.board.name }})
         env:

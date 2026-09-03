@@ -27,6 +27,8 @@ void setup() {
 	waitForWiFi();
 
 	LinkConfig config;
+	config.memory.allocation = Strata::Placement::PreferExternal;
+	config.memory.taskStack = Strata::Placement::PreferExternal;
 	config.maxConcurrentRequests = 2;
 
 	LinkResult initResult = client.init(config);

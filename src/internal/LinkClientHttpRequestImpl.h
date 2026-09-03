@@ -3,19 +3,25 @@ template <size_t CallbackStorageSize>
 void LinkClient<CallbackStorageSize>::performHttpRequest(
     WorkerRecord &worker, QueuedRequest &request
 ) {
-	char *currentUrl =
-	    link_memory::duplicateString(request.url.c_str(), std::strlen(request.url.c_str()));
+	char *currentUrl = link_memory::duplicateString(
+	    request.url.c_str(),
+	    std::strlen(request.url.c_str()),
+	    _config.memory.allocation
+	);
 	if (currentUrl == nullptr) {
 		if (request.responseMode == LinkResponseMode::Stream) {
 			LinkStreamResult result;
 			result.error = {LinkErrorCode::AllocationFailed, "url allocation failed"};
 			request.onStreamEnd(result);
 		} else if (request.parseJsonResponse) {
-			LinkJsonResponse response;
+			LinkJsonResponse response(&*_jsonAllocator);
+			response.headers.configurePlacement(_config.memory.allocation);
 			response.error = {LinkErrorCode::AllocationFailed, "url allocation failed"};
 			request.onJsonResponse(response);
 		} else {
 			LinkResponse response;
+			response.headers.configurePlacement(_config.memory.allocation);
+			response.body.setPlacement(_config.memory.allocation);
 			response.error = {LinkErrorCode::AllocationFailed, "url allocation failed"};
 			request.onResponse(response);
 		}
@@ -26,12 +32,14 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 	bool includeRequestHeaders = true;
 	while (true) {
 		LinkResponse response;
+		response.headers.configurePlacement(_config.memory.allocation);
 		response.headers.configureLimits(
 		    _config.maxHeaderCount,
 		    _config.maxHeaderNameSize,
 		    _config.maxHeaderValueSize,
 		    _config.maxTotalHeaderSize
 		);
+		response.body.setPlacement(_config.memory.allocation);
 
 		HttpEventContext temporaryContext;
 		HttpEventContext *context = &temporaryContext;
@@ -62,7 +70,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 				result.error = setupError;
 				request.onStreamEnd(result);
 			} else if (request.parseJsonResponse) {
-				LinkJsonResponse jsonResponse;
+				LinkJsonResponse jsonResponse(&*_jsonAllocator);
+				jsonResponse.headers.configurePlacement(_config.memory.allocation);
 				jsonResponse.error = setupError;
 				request.onJsonResponse(jsonResponse);
 			} else {
@@ -163,8 +172,11 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 			if (redirect.action == link_internal::LinkRedirectAction::Error) {
 				response.error = redirect.error;
 			} else if (redirect.action == link_internal::LinkRedirectAction::Follow) {
-				char *nextUrl =
-				    link_memory::duplicateString(redirect.location, std::strlen(redirect.location));
+				char *nextUrl = link_memory::duplicateString(
+				    redirect.location,
+				    std::strlen(redirect.location),
+				    _config.memory.allocation
+				);
 				if (nextUrl == nullptr) {
 					response.error = {
 					    LinkErrorCode::AllocationFailed,
@@ -196,7 +208,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		}
 
 		if (request.parseJsonResponse) {
-			LinkJsonResponse jsonResponse;
+			LinkJsonResponse jsonResponse(&*_jsonAllocator);
+			jsonResponse.headers.configurePlacement(_config.memory.allocation);
 			jsonResponse.error = response.error;
 			jsonResponse.httpStatus = response.httpStatus;
 			LinkResult headerCopyResult = jsonResponse.headers.copyFrom(response.headers);

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Strata.h>
 
 #include "internal/LinkCallback.h"
 #include "internal/LinkMemory.h"
@@ -13,16 +14,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <new>
 #include <type_traits>
 #include <utility>
 
 #if defined(ESP32)
 #include <esp_err.h>
 #include <esp_http_client.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
-#include <freertos/task.h>
+#include <strata/arduinojson/Allocator.h>
+#include <strata/freertos/Queue.h>
+#include <strata/freertos/Task.h>
 #endif
 
 enum class LinkErrorCode : uint8_t {
@@ -56,7 +56,6 @@ enum class LinkErrorCode : uint8_t {
 };
 
 enum class LinkState : uint8_t { Uninitialized, Starting, Running, Stopping };
-enum class LinkStackType : uint8_t { Internal, Psram, Auto };
 enum class LinkConnectionMode : uint8_t { PerRequest, PersistentPerWorker };
 enum class LinkMethod : uint8_t { Get, Post, Put, Patch, Delete, Head };
 enum class LinkResponseMode : uint8_t { Buffered, Stream };
@@ -90,10 +89,14 @@ struct LinkResult {
 };
 
 struct LinkConfig {
+	Strata::MemoryPolicy memory{
+	    .allocation = Strata::Placement::PreferExternal,
+	    .taskStack = Strata::Placement::PreferExternal,
+	};
+
 	uint32_t stackSizeBytes = 4096;
 	UBaseType_t priority = 1;
 	BaseType_t coreId = tskNO_AFFINITY;
-	LinkStackType stackType = LinkStackType::Auto;
 
 	size_t queueSize = 10;
 	size_t maxConcurrentRequests = 3;
@@ -133,13 +136,42 @@ struct LinkDiagnostics {
 	uint32_t transportDisconnectedEvents = 0;
 	size_t activeHttpClients = 0;
 	size_t peakHttpClients = 0;
+	Strata::Placement allocationPlacement = Strata::Placement::Default;
+	Strata::Placement workerStackPlacement = Strata::Placement::Default;
+	Strata::Region requestSlotRegion = Strata::Region::Unknown;
+	Strata::Region workerStorageRegion = Strata::Region::Unknown;
+	Strata::Region dispatchQueueStorageRegion = Strata::Region::Unknown;
+	size_t workerStacksInternal = 0;
+	size_t workerStacksExternal = 0;
+	size_t workerStacksUnknown = 0;
 };
 
 class LinkBody;
 class LinkBodyView;
 namespace link_internal {
 LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, LinkBody &out);
+
+#if defined(ESP32)
+inline ::ArduinoJson::Allocator *linkJsonAllocator(Strata::Placement placement) {
+	static Strata::ArduinoJson::Allocator defaultAllocator(Strata::Placement::Default);
+	static Strata::ArduinoJson::Allocator internalAllocator(Strata::Placement::Internal);
+	static Strata::ArduinoJson::Allocator preferExternalAllocator(Strata::Placement::PreferExternal);
+	static Strata::ArduinoJson::Allocator requireExternalAllocator(Strata::Placement::RequireExternal);
+
+	switch (placement) {
+	case Strata::Placement::Default:
+		return &defaultAllocator;
+	case Strata::Placement::Internal:
+		return &internalAllocator;
+	case Strata::Placement::PreferExternal:
+		return &preferExternalAllocator;
+	case Strata::Placement::RequireExternal:
+		return &requireExternalAllocator;
+	}
+	return &defaultAllocator;
 }
+#endif
+} // namespace link_internal
 
 class LinkHeaders {
   public:
@@ -157,6 +189,8 @@ class LinkHeaders {
 	    size_t maxHeaderValueSize,
 	    size_t maxTotalHeaderSize
 	);
+	void configurePlacement(Strata::Placement placement);
+	Strata::Placement placement() const;
 
 	LinkResult add(const char *name, const char *value);
 	LinkResult set(const char *name, const char *value);
@@ -186,6 +220,7 @@ class LinkHeaders {
 	bool copyEntry(Entry &entry, const char *name, const char *value);
 	void freeEntry(Entry &entry);
 	void moveFrom(LinkHeaders &other);
+	void releaseStorage();
 
 	Entry *_entries = nullptr;
 	size_t _count = 0;
@@ -195,6 +230,7 @@ class LinkHeaders {
 	size_t _maxHeaderNameSize = 64;
 	size_t _maxHeaderValueSize = 512;
 	size_t _maxTotalHeaderSize = 4096;
+	Strata::Placement _placement = Strata::Placement::PreferExternal;
 };
 
 class LinkBodyView {
@@ -262,11 +298,12 @@ struct LinkResponse {
 			return LinkResult::ok();
 		}
 		LinkHeaders nextHeaders;
+		nextHeaders.configurePlacement(other.headers.placement());
 		LinkResult headerResult = nextHeaders.copyFrom(other.headers);
 		if (!headerResult) {
 			return headerResult;
 		}
-		LinkOwnedBuffer nextBody;
+		LinkOwnedBuffer nextBody(other.body.placement());
 		if (!nextBody.copyFrom(other.body)) {
 			return LinkResult::error(
 			    LinkErrorCode::AllocationFailed,
@@ -305,6 +342,13 @@ struct LinkJsonResponse {
 	int httpStatus = 0;
 	LinkHeaders headers;
 	JsonDocument json;
+
+	LinkJsonResponse() = default;
+#if defined(ESP32)
+	explicit LinkJsonResponse(Strata::Placement placement)
+	    : json(link_internal::linkJsonAllocator(placement)) {
+	}
+#endif
 
 	explicit operator bool() const {
 		return error.code == LinkErrorCode::Ok;
@@ -424,9 +468,11 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		if (urlSize > config.maxUrlSize) {
 			return LinkResult::error(LinkErrorCode::UrlTooLarge, "url is too large");
 		}
+		url.setPlacement(config.memory.allocation);
 		if (!url.assignText(request.url, urlSize)) {
 			return LinkResult::error(LinkErrorCode::AllocationFailed, "url allocation failed");
 		}
+		headers.configurePlacement(config.memory.allocation);
 		headers.configureLimits(
 		    config.maxHeaderCount,
 		    config.maxHeaderNameSize,
@@ -658,6 +704,11 @@ template <size_t CallbackStorageSize> class LinkClient {
 	using QueuedRequest = link_internal::QueuedLinkRequest<CallbackStorageSize>;
 
 #if defined(ESP32)
+	struct WorkerSignal {
+		size_t slotIndex = 0;
+		bool stop = false;
+	};
+
 	struct HttpEventContext {
 		LinkClient *owner = nullptr;
 		QueuedRequest *request = nullptr;
@@ -688,10 +739,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 	struct WorkerRecord {
 		LinkClient *owner = nullptr;
 		size_t index = 0;
-		TaskHandle_t handle = nullptr;
-		bool createdWithCaps = false;
 		bool active = false;
+		bool readyForDelete = false;
 #if defined(ESP32)
+		Strata::FreeRTOS::Task task;
 		WorkerHttpSession http;
 #endif
 	};
@@ -733,12 +784,10 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	static void taskEntry(void *arg);
 	void workerLoop(WorkerRecord *worker);
-	bool popRequest(size_t &slotIndex);
 	void releaseSlot(size_t slotIndex);
 	void invokeCancelled(QueuedRequest &request);
 	void processRequest(WorkerRecord &worker, QueuedRequest &request);
 	LinkResult validateConfig(const LinkConfig &config) const;
-	bool shouldUsePsramStack() const;
 	LinkResult addJsonAccept(LinkHeaders &headers) const;
 	LinkResult deinitInternal(bool waitForever);
 	void forceDeinitBlocking();
@@ -757,15 +806,11 @@ template <size_t CallbackStorageSize> class LinkClient {
 	bool _stopWakeIssued = false;
 	QueuedRequest *_slots = nullptr;
 	bool *_slotUsed = nullptr;
-	size_t *_queue = nullptr;
-	size_t _queueHead = 0;
-	size_t _queueTail = 0;
-	size_t _queueCount = 0;
 	WorkerRecord *_workers = nullptr;
 	uint32_t _nextRequestId = 1;
 
 #if defined(ESP32)
-	SemaphoreHandle_t _items = nullptr;
+	Strata::FreeRTOS::Queue<WorkerSignal> _dispatchQueue;
 #endif
 };
 
