@@ -56,11 +56,8 @@ LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
 	if (_state != LinkState::Running) {
 		return LinkResult::error(LinkErrorCode::NotInitialized, "link is not initialized");
 	}
-	if (_slots == nullptr || _slotUsed == nullptr || _queue == nullptr) {
+	if (_slots == nullptr || _slotUsed == nullptr) {
 		return LinkResult::error(LinkErrorCode::InternalError, "link runtime storage is missing");
-	}
-	if (_queueCount >= _config.queueSize) {
-		return LinkResult::error(LinkErrorCode::QueueFull, "link queue is full");
 	}
 
 	const uint32_t requestId = _nextRequestId++;
@@ -82,14 +79,10 @@ LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
 
 	_slots[slotIndex] = std::move(queued);
 	_slotUsed[slotIndex] = true;
-	_queue[_queueTail] = slotIndex;
-	_queueTail = (_queueTail + 1) % _config.queueSize;
-	_queueCount++;
 
 #if defined(ESP32)
-	if (_items == nullptr || xSemaphoreGive(_items) != pdTRUE) {
-		_queueTail = (_queueTail + _config.queueSize - 1) % _config.queueSize;
-		_queueCount--;
+	const WorkerSignal signal{slotIndex, false};
+	if (!_dispatchQueue || !_dispatchQueue.send(signal, 0)) {
 		_slots[slotIndex].reset();
 		_slotUsed[slotIndex] = false;
 		return LinkResult::error(LinkErrorCode::InternalError, "worker signal failed");
@@ -98,18 +91,6 @@ LinkResult LinkClient<CallbackStorageSize>::fetch(const Request &request) {
 
 	_diagnostics.requestsSubmitted++;
 	return LinkResult::ok();
-}
-
-template <size_t CallbackStorageSize>
-bool LinkClient<CallbackStorageSize>::popRequest(size_t &slotIndex) {
-	LinkLock lock(_mutex);
-	if (!lock || _queueCount == 0 || _queue == nullptr) {
-		return false;
-	}
-	slotIndex = _queue[_queueHead];
-	_queueHead = (_queueHead + 1) % _config.queueSize;
-	_queueCount--;
-	return true;
 }
 
 template <size_t CallbackStorageSize>
@@ -136,7 +117,12 @@ void LinkClient<CallbackStorageSize>::invokeCancelled(QueuedRequest &request) {
 	}
 	if (request.parseJsonResponse) {
 		if (request.onJsonResponse) {
+#if defined(ESP32)
+			LinkJsonResponse response(&*_jsonAllocator);
+			response.headers.configurePlacement(_config.memory.allocation);
+#else
 			LinkJsonResponse response;
+#endif
 			response.error = {LinkErrorCode::Cancelled, "request cancelled"};
 			request.onJsonResponse(response);
 		}
@@ -144,6 +130,8 @@ void LinkClient<CallbackStorageSize>::invokeCancelled(QueuedRequest &request) {
 	}
 	if (request.onResponse) {
 		LinkResponse response;
+		response.headers.configurePlacement(_config.memory.allocation);
+		response.body.setPlacement(_config.memory.allocation);
 		response.error = {LinkErrorCode::Cancelled, "request cancelled"};
 		request.onResponse(response);
 	}
@@ -160,39 +148,29 @@ template <size_t CallbackStorageSize>
 void LinkClient<CallbackStorageSize>::workerLoop(WorkerRecord *worker) {
 #if defined(ESP32)
 	while (true) {
-		{
-			LinkLock lock(_mutex);
-			if (lock && _state == LinkState::Stopping && _queueCount == 0) {
-				break;
-			}
-		}
-		if (_items != nullptr) {
-			(void)xSemaphoreTake(_items, portMAX_DELAY);
-		}
-		{
-			LinkLock lock(_mutex);
-			if (lock && _state == LinkState::Stopping && _queueCount == 0) {
-				break;
-			}
-		}
-		size_t slotIndex = 0;
-		if (!popRequest(slotIndex)) {
+		WorkerSignal signal;
+		if (!_dispatchQueue.receive(signal, portMAX_DELAY)) {
 			continue;
 		}
-		processRequest(*worker, _slots[slotIndex]);
-		releaseSlot(slotIndex);
+		if (signal.stop) {
+			break;
+		}
+		if (signal.slotIndex >= _config.queueSize || _slots == nullptr || _slotUsed == nullptr) {
+			continue;
+		}
+		processRequest(*worker, _slots[signal.slotIndex]);
+		releaseSlot(signal.slotIndex);
 	}
 	if (worker != nullptr) {
 		cleanupPersistentHttpClient(*worker, HttpSessionCleanupReason::Shutdown);
-		const bool createdWithCaps = worker->createdWithCaps;
 		{
 			LinkLock lock(_mutex);
 			if (lock) {
 				worker->active = false;
-				worker->handle = nullptr;
+				worker->readyForDelete = true;
 			}
 		}
-		link_task_support::deleteCurrentTask(createdWithCaps);
+		link_task_support::suspendCurrentTask();
 	}
 #else
 	(void)worker;
