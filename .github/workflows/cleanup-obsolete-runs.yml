@@ -9,7 +9,7 @@ permissions:
 jobs:
   cleanup:
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, zekstack-ci]
+    runs-on: ubuntu-latest
     steps:
       - name: Cancel superseded branch runs
         uses: actions/github-script@v7
