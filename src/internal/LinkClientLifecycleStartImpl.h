@@ -102,7 +102,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		_diagnostics = LinkDiagnostics{};
 		_diagnostics.allocationPlacement = config.memory.allocation;
 		_diagnostics.workerStackPlacement = config.memory.taskStack;
-		_slots = link_memory::allocateArray<QueuedRequest>(config.queueSize, config.memory.allocation);
+		_slots =
+		    link_memory::allocateArray<QueuedRequest>(config.queueSize, config.memory.allocation);
 		_slotUsed = link_memory::allocateArray<bool>(config.queueSize, config.memory.allocation);
 		_workers = link_memory::allocateArray<WorkerRecord>(
 		    config.maxConcurrentRequests,
@@ -140,13 +141,11 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		    "worker signal capacity is too large"
 		);
 	}
-	_dispatchQueue = Strata::FreeRTOS::Queue<WorkerSignal>::create(
-	    Strata::FreeRTOS::QueueConfig{
-	        .length = static_cast<size_t>(signalCapacity),
-	        .storagePlacement = config.memory.allocation,
-	        .usage = Strata::FreeRTOS::QueueUsage::TaskOnly,
-	    }
-	);
+	_dispatchQueue = Strata::FreeRTOS::Queue<WorkerSignal>::create(Strata::FreeRTOS::QueueConfig{
+	    .length = static_cast<size_t>(signalCapacity),
+	    .storagePlacement = config.memory.allocation,
+	    .usage = Strata::FreeRTOS::QueueUsage::TaskOnly,
+	});
 	if (!_dispatchQueue) {
 		forceDeinitBlocking();
 		return LinkResult::error(LinkErrorCode::AllocationFailed, "link dispatch queue failed");
@@ -175,7 +174,8 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			worker.readyForDelete = false;
 			worker.http.originHost.setPlacement(config.memory.allocation);
 			worker.http.eventContext.owner = this;
-			worker.http.eventContext.streamInfo.headers.configurePlacement(config.memory.allocation);
+			worker.http.eventContext.streamInfo.headers.configurePlacement(config.memory.allocation
+			);
 		}
 
 		char name[16]{};

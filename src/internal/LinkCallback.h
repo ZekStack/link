@@ -68,9 +68,7 @@ class LinkCallback<ReturnType(Args...), StorageSize> {
 				    std::move(*static_cast<CallableType *>(source))
 				);
 			};
-			_destroy = [](void *storage) {
-				std::destroy_at(static_cast<CallableType *>(storage));
-			};
+			_destroy = [](void *storage) { std::destroy_at(static_cast<CallableType *>(storage)); };
 			return true;
 		}
 	}

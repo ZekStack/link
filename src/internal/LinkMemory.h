@@ -39,10 +39,8 @@ inline bool consumeTestAllocation() {
 }
 #endif
 
-inline void *allocate(
-    size_t bytes,
-    Strata::Placement placement = Strata::Placement::PreferExternal
-) {
+inline void *
+allocate(size_t bytes, Strata::Placement placement = Strata::Placement::PreferExternal) {
 	if (bytes == 0) {
 		return nullptr;
 	}
@@ -77,8 +75,7 @@ inline char *duplicateString(
 	return copy;
 }
 
-template <typename T>
-T *allocateArray(size_t count, Strata::Placement placement) {
+template <typename T> T *allocateArray(size_t count, Strata::Placement placement) {
 	static_assert(std::is_nothrow_default_constructible_v<T>);
 	static_assert(std::is_nothrow_destructible_v<T>);
 	if (count == 0 || count > std::numeric_limits<size_t>::max() / sizeof(T)) {
@@ -182,9 +179,7 @@ class LinkOwnedBuffer {
 			value = "";
 			size = 0;
 		}
-		_data = reinterpret_cast<uint8_t *>(
-		    link_memory::duplicateString(value, size, _placement)
-		);
+		_data = reinterpret_cast<uint8_t *>(link_memory::duplicateString(value, size, _placement));
 		if (_data == nullptr) {
 			return false;
 		}

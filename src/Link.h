@@ -155,8 +155,11 @@ LinkResult linkBodyFromView(const LinkBodyView &view, const LinkConfig &config, 
 inline ::ArduinoJson::Allocator *linkJsonAllocator(Strata::Placement placement) {
 	static Strata::ArduinoJson::Allocator defaultAllocator(Strata::Placement::Default);
 	static Strata::ArduinoJson::Allocator internalAllocator(Strata::Placement::Internal);
-	static Strata::ArduinoJson::Allocator preferExternalAllocator(Strata::Placement::PreferExternal);
-	static Strata::ArduinoJson::Allocator requireExternalAllocator(Strata::Placement::RequireExternal);
+	static Strata::ArduinoJson::Allocator preferExternalAllocator(Strata::Placement::PreferExternal
+	);
+	static Strata::ArduinoJson::Allocator requireExternalAllocator(
+	    Strata::Placement::RequireExternal
+	);
 
 	switch (placement) {
 	case Strata::Placement::Default:
