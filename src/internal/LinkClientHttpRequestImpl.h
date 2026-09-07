@@ -14,7 +14,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 			result.error = {LinkErrorCode::AllocationFailed, "url allocation failed"};
 			request.onStreamEnd(result);
 		} else if (request.parseJsonResponse) {
-			LinkJsonResponse response(&*_jsonAllocator);
+			LinkJsonResponse response(_config.memory.allocation);
 			response.headers.configurePlacement(_config.memory.allocation);
 			response.error = {LinkErrorCode::AllocationFailed, "url allocation failed"};
 			request.onJsonResponse(response);
@@ -70,7 +70,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 				result.error = setupError;
 				request.onStreamEnd(result);
 			} else if (request.parseJsonResponse) {
-				LinkJsonResponse jsonResponse(&*_jsonAllocator);
+				LinkJsonResponse jsonResponse(_config.memory.allocation);
 				jsonResponse.headers.configurePlacement(_config.memory.allocation);
 				jsonResponse.error = setupError;
 				request.onJsonResponse(jsonResponse);
@@ -208,7 +208,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		}
 
 		if (request.parseJsonResponse) {
-			LinkJsonResponse jsonResponse(&*_jsonAllocator);
+			LinkJsonResponse jsonResponse(_config.memory.allocation);
 			jsonResponse.headers.configurePlacement(_config.memory.allocation);
 			jsonResponse.error = response.error;
 			jsonResponse.httpStatus = response.httpStatus;
