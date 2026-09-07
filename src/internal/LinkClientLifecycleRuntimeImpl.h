@@ -118,7 +118,7 @@ void LinkClient<CallbackStorageSize>::invokeCancelled(QueuedRequest &request) {
 	if (request.parseJsonResponse) {
 		if (request.onJsonResponse) {
 #if defined(ESP32)
-			LinkJsonResponse response(&*_jsonAllocator);
+			LinkJsonResponse response(_config.memory.allocation);
 			response.headers.configurePlacement(_config.memory.allocation);
 #else
 			LinkJsonResponse response;
