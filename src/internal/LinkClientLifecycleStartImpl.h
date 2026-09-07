@@ -150,7 +150,6 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 		forceDeinitBlocking();
 		return LinkResult::error(LinkErrorCode::AllocationFailed, "link dispatch queue failed");
 	}
-	_jsonAllocator.emplace(config.memory.allocation);
 	{
 		LinkLock lock(_mutex);
 		if (!lock) {
@@ -333,7 +332,6 @@ LinkResult LinkClient<CallbackStorageSize>::freeRuntimeStorage() {
 	const size_t workerCount = _config.maxConcurrentRequests;
 #if defined(ESP32)
 	_dispatchQueue.reset();
-	_jsonAllocator.reset();
 	if (_workers != nullptr) {
 		for (size_t i = 0; i < workerCount; ++i) {
 			_workers[i].task.reset();
