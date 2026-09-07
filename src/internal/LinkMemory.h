@@ -66,7 +66,7 @@ inline char *duplicateString(
 	if (length == std::numeric_limits<size_t>::max()) {
 		return nullptr;
 	}
-	char *copy = static_cast<char *>(allocate(length + 1, placement));
+	char *copy = static_cast<char *>(link_memory::allocate(length + 1, placement));
 	if (copy == nullptr) {
 		return nullptr;
 	}
