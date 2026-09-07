@@ -1,6 +1,6 @@
 {
   "name": "Link",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Async HTTP client library for ESP32 with bounded memory and fetch-style requests.",
   "keywords": [
     "esp32",
@@ -25,11 +25,12 @@
   "frameworks": "arduino",
   "platforms": "espressif32",
   "dependencies": {
-    "bblanchon/ArduinoJson": ">=7.0.0"
+    "bblanchon/ArduinoJson": ">=7.0.0",
+    "Strata": "https://github.com/ZekStack/strata.git#v0.1.2"
   },
   "build": {
     "srcDir": "src",
-  "includeDir": "src",
+    "includeDir": "src",
     "flags": [
       "-std=gnu++20"
     ]

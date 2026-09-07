@@ -79,6 +79,7 @@ void LinkClient<CallbackStorageSize>::resetHttpEventContext(
 	context.streamInfo.httpStatus = 0;
 	context.streamInfo.contentLength = -1;
 	context.streamInfo.headers.clear();
+	context.streamInfo.headers.configurePlacement(_config.memory.allocation);
 	context.streamInfo.headers.configureLimits(
 	    _config.maxHeaderCount,
 	    _config.maxHeaderNameSize,
@@ -99,7 +100,6 @@ bool LinkClient<CallbackStorageSize>::scrubHttpClientRequest(
     esp_http_client_handle_t client, const LinkHeaders &headers, size_t appliedHeaderCount
 ) {
 	bool clean = true;
-	// ESP-IDF clears Content-Type with the POST field and reports not-found when it is absent.
 	const esp_err_t bodyResult = esp_http_client_set_post_field(client, nullptr, 0);
 	if (!link_internal::linkHttpRequestStateMutationSucceeded(
 	        bodyResult,
