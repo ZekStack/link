@@ -49,11 +49,7 @@ LinkError LinkClient<CallbackStorageSize>::performStreamingRequestBody(
 			);
 			if (writeResult <= 0) {
 				(void)esp_http_client_close(client);
-				return link_internal_http::mapEspError(
-				    ESP_ERR_HTTP_WRITE_DATA,
-				    client,
-				    currentUrl
-				);
+				return link_internal_http::mapEspError(ESP_ERR_HTTP_WRITE_DATA, client, currentUrl);
 			}
 			written += static_cast<size_t>(writeResult);
 		}
@@ -72,11 +68,7 @@ LinkError LinkClient<CallbackStorageSize>::performStreamingRequestBody(
 			return {LinkErrorCode::Timeout, "http request timed out"};
 		}
 #endif
-		return link_internal_http::mapEspError(
-		    ESP_ERR_HTTP_FETCH_HEADER,
-		    client,
-		    currentUrl
-		);
+		return link_internal_http::mapEspError(ESP_ERR_HTTP_FETCH_HEADER, client, currentUrl);
 	}
 
 	while (!esp_http_client_is_complete_data_received(client)) {
@@ -107,11 +99,7 @@ LinkError LinkClient<CallbackStorageSize>::performStreamingRequestBody(
 			return {LinkErrorCode::Timeout, "http request timed out"};
 		}
 #endif
-		return link_internal_http::mapEspError(
-		    ESP_ERR_HTTP_INCOMPLETE_DATA,
-		    client,
-		    currentUrl
-		);
+		return link_internal_http::mapEspError(ESP_ERR_HTTP_INCOMPLETE_DATA, client, currentUrl);
 	}
 
 	return {LinkErrorCode::Ok, "ok"};
@@ -244,8 +232,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		LinkError transportError = setupError;
 		if (setupError.code == LinkErrorCode::Ok) {
 			if (request.onRequestBodyRead) {
-				transportError =
-				    performStreamingRequestBody(client, request, currentUrl, *context);
+				transportError = performStreamingRequestBody(client, request, currentUrl, *context);
 				if (persistent && transportError.code == LinkErrorCode::Ok) {
 					(void)esp_http_client_close(client);
 				}
