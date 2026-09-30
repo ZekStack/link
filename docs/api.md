@@ -69,6 +69,8 @@ client.get(url, callback);
 client.get(url, headers, callback);
 client.post(url, body, callback);
 client.post(url, headers, body, callback);
+client.postStreamBody(url, contentLength, readCallback, callback);
+client.postStreamBody(url, headers, contentLength, readCallback, callback);
 client.getJson(url, callback);
 client.getJson(url, headers, callback);
 client.postJson(url, json, callback);
@@ -93,7 +95,9 @@ LinkBodyView::json(jsonDocument);
 LinkBodyView::bytes(data, size);
 ```
 
-Body views do not allocate and do not own their source data. Link validates and copies a body into Strata-backed queue storage before `fetch()`, `post()`, or `postJson()` returns. Queued requests own copied URL, header, serialized body, and callback data.
+Body views do not allocate and do not own their source data. Link validates and copies a buffered body into Strata-backed queue storage before `fetch()`, `post()`, or `postJson()` returns. Queued requests own copied URL, header, serialized body, and callback data.
+
+`LinkRequestT::streamBody` provides a known-length streaming request body. Set `contentLength` and assign `read(offset, destination, capacity)`. The reader callback is copied into the queued request, but the payload itself is not copied. `maxRequestBodySize` remains the logical body-size limit, and `streamChunkSize` bounds the worker scratch buffer used to pull data from the reader.
 
 ## Response ownership
 

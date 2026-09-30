@@ -44,6 +44,8 @@ const char *linkErrorCodeToString(LinkErrorCode code) {
 		return "CallbackTooLarge";
 	case LinkErrorCode::RequestTooLarge:
 		return "RequestTooLarge";
+	case LinkErrorCode::RequestBodyReadFailed:
+		return "RequestBodyReadFailed";
 	case LinkErrorCode::ResponseTooLarge:
 		return "ResponseTooLarge";
 	case LinkErrorCode::HeaderTooLarge:

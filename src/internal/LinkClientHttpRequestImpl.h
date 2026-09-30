@@ -1,5 +1,123 @@
 #if defined(ESP32)
 template <size_t CallbackStorageSize>
+LinkError LinkClient<CallbackStorageSize>::performStreamingRequestBody(
+    esp_http_client_handle_t client,
+    QueuedRequest &request,
+    const char *currentUrl,
+    HttpEventContext &context
+) {
+	LinkOwnedBuffer scratch(_config.memory.allocation);
+	if (!scratch.allocateForWrite(_config.streamChunkSize, false)) {
+		return {LinkErrorCode::AllocationFailed, "stream request buffer allocation failed"};
+	}
+
+	const esp_err_t openResult =
+	    esp_http_client_open(client, static_cast<int>(request.streamBodyContentLength));
+	if (openResult != ESP_OK) {
+		return link_internal_http::mapEspError(openResult, client, currentUrl);
+	}
+
+	size_t offset = 0;
+	while (offset < request.streamBodyContentLength) {
+		if (state() == LinkState::Stopping) {
+			(void)esp_http_client_close(client);
+			return {LinkErrorCode::Cancelled, "request cancelled"};
+		}
+
+		const size_t remaining = request.streamBodyContentLength - offset;
+		const size_t capacity = remaining < scratch.size() ? remaining : scratch.size();
+		const size_t produced = request.onRequestBodyRead(offset, scratch.data(), capacity);
+		if (produced == 0 || produced > capacity || produced > remaining) {
+			(void)esp_http_client_close(client);
+			return {
+			    LinkErrorCode::RequestBodyReadFailed,
+			    "stream request body reader returned an invalid size"
+			};
+		}
+
+		size_t written = 0;
+		while (written < produced) {
+			if (state() == LinkState::Stopping) {
+				(void)esp_http_client_close(client);
+				return {LinkErrorCode::Cancelled, "request cancelled"};
+			}
+			const size_t pending = produced - written;
+			const int writeResult = esp_http_client_write(
+			    client,
+			    reinterpret_cast<const char *>(scratch.data() + written),
+			    static_cast<int>(pending)
+			);
+			if (writeResult <= 0) {
+				(void)esp_http_client_close(client);
+				return link_internal_http::mapEspError(
+				    ESP_ERR_HTTP_WRITE_DATA,
+				    client,
+				    currentUrl
+				);
+			}
+			written += static_cast<size_t>(writeResult);
+		}
+		offset += produced;
+	}
+
+	const int64_t headerResult = esp_http_client_fetch_headers(client);
+	if (context.eventError.code != LinkErrorCode::Ok) {
+		(void)esp_http_client_close(client);
+		return context.eventError;
+	}
+	if (headerResult < 0) {
+		(void)esp_http_client_close(client);
+#if defined(ESP_ERR_HTTP_EAGAIN)
+		if (headerResult == -static_cast<int64_t>(ESP_ERR_HTTP_EAGAIN)) {
+			return {LinkErrorCode::Timeout, "http request timed out"};
+		}
+#endif
+		return link_internal_http::mapEspError(
+		    ESP_ERR_HTTP_FETCH_HEADER,
+		    client,
+		    currentUrl
+		);
+	}
+
+	while (!esp_http_client_is_complete_data_received(client)) {
+		if (state() == LinkState::Stopping) {
+			(void)esp_http_client_close(client);
+			return {LinkErrorCode::Cancelled, "request cancelled"};
+		}
+
+		const int readResult = esp_http_client_read(
+		    client,
+		    reinterpret_cast<char *>(scratch.data()),
+		    static_cast<int>(scratch.size())
+		);
+		if (context.eventError.code != LinkErrorCode::Ok) {
+			(void)esp_http_client_close(client);
+			return context.eventError;
+		}
+		if (readResult > 0) {
+			continue;
+		}
+		if (readResult == 0 && esp_http_client_is_complete_data_received(client)) {
+			break;
+		}
+
+		(void)esp_http_client_close(client);
+#if defined(ESP_ERR_HTTP_EAGAIN)
+		if (readResult == -static_cast<int>(ESP_ERR_HTTP_EAGAIN)) {
+			return {LinkErrorCode::Timeout, "http request timed out"};
+		}
+#endif
+		return link_internal_http::mapEspError(
+		    ESP_ERR_HTTP_INCOMPLETE_DATA,
+		    client,
+		    currentUrl
+		);
+	}
+
+	return {LinkErrorCode::Ok, "ok"};
+}
+
+template <size_t CallbackStorageSize>
 void LinkClient<CallbackStorageSize>::performHttpRequest(
     WorkerRecord &worker, QueuedRequest &request
 ) {
@@ -123,14 +241,19 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 			);
 		}
 
-		const esp_err_t err =
-		    setupError.code == LinkErrorCode::Ok ? esp_http_client_perform(client) : ESP_FAIL;
+		LinkError transportError = setupError;
+		if (setupError.code == LinkErrorCode::Ok) {
+			if (request.onRequestBodyRead) {
+				transportError =
+				    performStreamingRequestBody(client, request, currentUrl, *context);
+			} else {
+				const esp_err_t err = esp_http_client_perform(client);
+				transportError = link_internal_http::mapEspError(err, client, currentUrl);
+			}
+		}
 		response.httpStatus = esp_http_client_get_status_code(client);
 		context->streamInfo.httpStatus = response.httpStatus;
 		context->streamInfo.contentLength = esp_http_client_get_content_length(client);
-		LinkError transportError = setupError.code == LinkErrorCode::Ok
-		                               ? link_internal_http::mapEspError(err, client, currentUrl)
-		                               : setupError;
 		const bool scrubbed = !link_internal::linkShouldScrubHttpClientRequest(persistent) ||
 		                      scrubHttpClientRequest(client, request.headers, appliedHeaderCount);
 

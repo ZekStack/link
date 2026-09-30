@@ -1,27 +1,76 @@
 # Streaming
 
+Link supports streaming in both directions:
+
+- `getStream()` streams a response without buffering the full response body.
+- request-body streaming sends a known-length request body without copying the full payload into Link-owned queue storage.
+
+## Streaming responses
+
 `getStream()` downloads response data without buffering the full body.
 
 ```cpp
-client.getStream(
+client.getStream(url, onStart, onChunk, onEnd);
+```
+
+The chunk callback receives data valid only during the callback. Return `LinkStreamAction::Cancel` to stop the request; `onEnd` then receives `LinkErrorCode::Cancelled`.
+
+## Streaming request bodies
+
+Use `postStreamBody()` for the common POST case:
+
+```cpp
+client.postStreamBody(
     url,
-    onStart,
-    onChunk,
-    onEnd
+    contentLength,
+    [](size_t offset, uint8_t *destination, size_t capacity) -> size_t {
+        // Fill up to capacity bytes starting at offset.
+        return produced;
+    },
+    [](const LinkResponse &response) {
+        // Normal buffered response handling.
+    }
 );
 ```
 
-The chunk callback receives data valid only during the callback.
+For PUT, PATCH, DELETE, streamed responses, or JSON response parsing, configure `LinkRequestT::streamBody` and call `fetch()` directly:
 
 ```cpp
-LinkStreamAction onChunk(const LinkStreamChunk &chunk) {
-    return LinkStreamAction::Continue;
-}
+LinkRequest request;
+request.method = LinkMethod::Put;
+request.url = url;
+request.streamBody.contentLength = contentLength;
+request.streamBody.read.assign(readCallback);
+request.onResponse.assign(responseCallback);
+client.fetch(request);
 ```
 
-Return `LinkStreamAction::Cancel` to stop the request. The end callback then receives `LinkErrorCode::Cancelled`.
+The reader callback contract is:
 
-`LinkConfig::streamChunkSize` controls the intended worker read buffer size. Stream mode does not allocate a full response body.
+- `offset` is the logical byte offset requested by Link.
+- `capacity` is at most `LinkConfig::streamChunkSize` and never exceeds the remaining body length.
+- return between 1 and `capacity` bytes while data remains;
+- returning 0 before `contentLength` bytes are produced, or returning more than `capacity`, fails with `RequestBodyReadFailed`;
+- a zero-length streamed body is valid when a reader callback is configured;
+- the source should be seekable/re-readable because an HTTP attempt may start again from offset 0.
+
+Link copies the reader callback into the queued request, but objects referenced by that callback remain application-owned and must outlive the request's terminal response callback.
+
+`maxRequestBodySize` is the logical limit for buffered and streamed request bodies. Raising it for a streamed request does not allocate that amount of RAM. Link allocates only a `streamChunkSize` scratch buffer while the worker performs the upload.
+
+Link owns HTTP `Content-Length` framing for streamed bodies from `streamBody.contentLength`.
+
+## Request and response streaming together
+
+Request-body streaming is independent from `LinkResponseMode`. A single request may stream its upload and also set `responseMode = LinkResponseMode::Stream`; the normal `onStreamStart`, `onStreamChunk`, and `onStreamEnd` callbacks then process the response.
+
+## Cancellation and failures
+
+Shutdown is checked between upload chunks and writes. An active streamed upload terminates with `Cancelled` when Link enters `Stopping`.
+
+If the source cannot provide the declared bytes, Link reports `RequestBodyReadFailed`. HTTP transport write failures remain `SendFailed`.
+
+`LinkConfig::streamChunkSize` controls both the intended response stream buffer size and the scratch buffer used for streamed uploads. Neither stream mode allocates storage for the full payload.
 
 ## Redirects
 

@@ -10,7 +10,7 @@ Link helps Arduino ESP32 firmware communicate with APIs and backend services usi
 
 ## Why use Link?
 
-* **Fetch-style requests** - submit `get`, `post`, `getJson`, `postJson`, or `getStream` work from normal FreeRTOS tasks.
+* **Fetch-style requests** - submit `get`, `post`, `postStreamBody`, `getJson`, `postJson`, or `getStream` work from normal FreeRTOS tasks.
 * **Concurrent workers** - run more than one HTTP request at a time with a bounded worker pool.
 * **Consistent memory policy** - `Strata::MemoryPolicy` controls Link-owned allocations and worker task stacks.
 * **Bounded payloads** - accepted URLs, bodies, headers, serialized JSON, callbacks, and streaming behavior have explicit limits.
@@ -183,7 +183,7 @@ Serial.printf(
 * HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
 * Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in.
 * Caller-supplied headers are stripped after an origin change. Intermediate redirect bodies are discarded.
-* Request body views are copied into owned storage before submission returns, so the source only needs to remain valid for the submission call.
+* Buffered request body views are copied into owned storage before submission returns. Streaming request bodies copy only their reader callback and declared length; referenced source state must remain valid until the terminal response callback.
 * `LinkJsonResponse::json` and streaming chunk data are callback-scoped unless copied by the application.
 
 ## Documentation

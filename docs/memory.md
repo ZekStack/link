@@ -32,7 +32,8 @@ The general allocation policy applies to Link-owned movable storage:
 - Strata dispatch-queue item storage;
 - copied request URLs and redirect URLs;
 - request/response headers and their names/values;
-- serialized request bodies;
+- serialized/buffered request bodies;
+- streamed request scratch buffers;
 - buffered response bodies;
 - persistent per-worker origin host storage;
 - Link-created parsed `LinkJsonResponse::json` storage through `Strata::ArduinoJson::Allocator`.
@@ -71,7 +72,9 @@ config.streamChunkSize = 1024;
 
 `queueSize` is the maximum number of accepted in-flight requests, including queued and active requests. Active requests retain their slot until completion, so `queueSize` must be at least `maxConcurrentRequests`.
 
-Public `LinkBodyView` factories do not allocate. During submission, Link validates the body limits and copies the body into owned queue storage before returning. The source text, bytes, or request `JsonDocument` only needs to remain valid until the submission call completes.
+Public `LinkBodyView` factories do not allocate. During submission, Link validates buffered body limits and copies the body into owned queue storage before returning. The source text, bytes, or request `JsonDocument` only needs to remain valid until the submission call completes.
+
+Streaming request bodies copy only the reader callback and declared content length into the queued request. The worker allocates one `streamChunkSize` scratch buffer while that upload is active, so payload size does not determine Link-owned RAM usage. Application objects referenced by the reader callback must remain valid until the terminal response callback.
 
 ## Explicit copy behavior
 
