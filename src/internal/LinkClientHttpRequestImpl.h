@@ -234,13 +234,8 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		LinkError transportError = setupError;
 		if (setupError.code == LinkErrorCode::Ok) {
 			if (request.onRequestBodyRead) {
-				transportError = performStreamingRequestBody(
-				    worker,
-				    client,
-				    request,
-				    currentUrl,
-				    *context
-				);
+				transportError =
+				    performStreamingRequestBody(worker, client, request, currentUrl, *context);
 				if (persistent && transportError.code == LinkErrorCode::Ok) {
 					(void)esp_http_client_close(client);
 				}
