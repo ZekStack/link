@@ -136,9 +136,7 @@ void testStreamingRequestBodyValidation() {
 	missingReader.url = "https://example.com/upload";
 	missingReader.streamBody.contentLength = 1;
 	assert(missingReader.onResponse.assign([](const LinkResponse &) {}));
-	assert(
-	    queued.copyFrom(missingReader, config, 8).code == LinkErrorCode::RequestBodyReadFailed
-	);
+	assert(queued.copyFrom(missingReader, config, 8).code == LinkErrorCode::RequestBodyReadFailed);
 
 	LinkRequest conflictingBodies;
 	conflictingBodies.method = LinkMethod::Post;
@@ -156,17 +154,16 @@ void testStreamingRequestBodyValidation() {
 	));
 	assert(conflictingBodies.onResponse.assign([](const LinkResponse &) {}));
 	assert(
-	    queued.copyFrom(conflictingBodies, config, 9).code ==
-	    LinkErrorCode::RequestBodyReadFailed
+	    queued.copyFrom(conflictingBodies, config, 9).code == LinkErrorCode::RequestBodyReadFailed
 	);
 
 	LinkRequest oversized;
 	oversized.method = LinkMethod::Post;
 	oversized.url = "https://example.com/upload";
 	oversized.streamBody.contentLength = config.maxRequestBodySize + 1;
-	assert(oversized.streamBody.read.assign(
-	    [](size_t, uint8_t *, size_t capacity) -> size_t { return capacity; }
-	));
+	assert(oversized.streamBody.read.assign([](size_t, uint8_t *, size_t capacity) -> size_t {
+		return capacity;
+	}));
 	assert(oversized.onResponse.assign([](const LinkResponse &) {}));
 	assert(queued.copyFrom(oversized, config, 10).code == LinkErrorCode::RequestTooLarge);
 
@@ -174,9 +171,9 @@ void testStreamingRequestBodyValidation() {
 	empty.method = LinkMethod::Post;
 	empty.url = "https://example.com/upload";
 	empty.streamBody.contentLength = 0;
-	assert(empty.streamBody.read.assign(
-	    [](size_t, uint8_t *, size_t) -> size_t { return 0; }
-	));
+	assert(empty.streamBody.read.assign([](size_t, uint8_t *, size_t) -> size_t {
+		return 0;
+	}));
 	assert(empty.onResponse.assign([](const LinkResponse &) {}));
 	assert(queued.copyFrom(empty, config, 11));
 	assert(queued.streamBodyContentLength == 0);
