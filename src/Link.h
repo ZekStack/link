@@ -846,6 +846,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 #if defined(ESP32)
 		Strata::FreeRTOS::Task task;
 		WorkerHttpSession http;
+		LinkOwnedBuffer streamScratch;
 #endif
 	};
 
@@ -883,6 +884,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void recordTransportConnected();
 	void recordTransportDisconnected();
 	LinkError performStreamingRequestBody(
+	    WorkerRecord &worker,
 	    esp_http_client_handle_t client,
 	    QueuedRequest &request,
 	    const char *currentUrl,
