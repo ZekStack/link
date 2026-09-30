@@ -171,9 +171,7 @@ void testStreamingRequestBodyValidation() {
 	empty.method = LinkMethod::Post;
 	empty.url = "https://example.com/upload";
 	empty.streamBody.contentLength = 0;
-	assert(empty.streamBody.read.assign([](size_t, uint8_t *, size_t) -> size_t {
-		return 0;
-	}));
+	assert(empty.streamBody.read.assign([](size_t, uint8_t *, size_t) -> size_t { return 0; }));
 	assert(empty.onResponse.assign([](const LinkResponse &) {}));
 	assert(queued.copyFrom(empty, config, 11));
 	assert(queued.streamBodyContentLength == 0);
