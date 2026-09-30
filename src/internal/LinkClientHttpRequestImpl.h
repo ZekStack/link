@@ -246,6 +246,9 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 			if (request.onRequestBodyRead) {
 				transportError =
 				    performStreamingRequestBody(client, request, currentUrl, *context);
+				if (persistent && transportError.code == LinkErrorCode::Ok) {
+					(void)esp_http_client_close(client);
+				}
 			} else {
 				const esp_err_t err = esp_http_client_perform(client);
 				transportError = link_internal_http::mapEspError(err, client, currentUrl);
