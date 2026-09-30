@@ -1,13 +1,15 @@
 #if defined(ESP32)
 template <size_t CallbackStorageSize>
 LinkError LinkClient<CallbackStorageSize>::performStreamingRequestBody(
+    WorkerRecord &worker,
     esp_http_client_handle_t client,
     QueuedRequest &request,
     const char *currentUrl,
     HttpEventContext &context
 ) {
-	LinkOwnedBuffer scratch(_config.memory.allocation);
-	if (!scratch.allocateForWrite(_config.streamChunkSize, false)) {
+	LinkOwnedBuffer &scratch = worker.streamScratch;
+	if (scratch.size() != _config.streamChunkSize &&
+	    !scratch.allocateForWrite(_config.streamChunkSize, false)) {
 		return {LinkErrorCode::AllocationFailed, "stream request buffer allocation failed"};
 	}
 
@@ -232,7 +234,7 @@ void LinkClient<CallbackStorageSize>::performHttpRequest(
 		LinkError transportError = setupError;
 		if (setupError.code == LinkErrorCode::Ok) {
 			if (request.onRequestBodyRead) {
-				transportError = performStreamingRequestBody(client, request, currentUrl, *context);
+				transportError = performStreamingRequestBody(worker, client, request, currentUrl, *context);
 				if (persistent && transportError.code == LinkErrorCode::Ok) {
 					(void)esp_http_client_close(client);
 				}
