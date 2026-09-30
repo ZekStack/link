@@ -385,8 +385,9 @@ struct LinkStreamResult {
 };
 
 template <size_t CallbackStorageSize> struct LinkRequestBodyStreamT {
-	using ReadCallback =
-	    LinkCallback<size_t(size_t offset, uint8_t *destination, size_t capacity), CallbackStorageSize>;
+	using ReadCallback = LinkCallback<
+	    size_t(size_t offset, uint8_t *destination, size_t capacity),
+	    CallbackStorageSize>;
 
 	size_t contentLength = 0;
 	ReadCallback read;
@@ -405,7 +406,8 @@ template <size_t CallbackStorageSize> struct LinkRequestT {
 	using StreamChunkCallback =
 	    LinkCallback<LinkStreamAction(const LinkStreamChunk &), CallbackStorageSize>;
 	using StreamEndCallback = LinkCallback<void(const LinkStreamResult &), CallbackStorageSize>;
-	using RequestBodyReadCallback = typename LinkRequestBodyStreamT<CallbackStorageSize>::ReadCallback;
+	using RequestBodyReadCallback =
+	    typename LinkRequestBodyStreamT<CallbackStorageSize>::ReadCallback;
 
 	LinkMethod method = LinkMethod::Get;
 	const char *url = nullptr;
@@ -656,10 +658,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 
 	template <typename ReadCallbackType, typename Callback>
 	LinkResult postStreamBody(
-	    const char *url,
-	    size_t contentLength,
-	    ReadCallbackType &&read,
-	    Callback &&callback
+	    const char *url, size_t contentLength, ReadCallbackType &&read, Callback &&callback
 	) {
 		LinkHeaders headers;
 		return postStreamBody(
