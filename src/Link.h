@@ -38,6 +38,7 @@ enum class LinkErrorCode : uint8_t {
 	AllocationFailed,
 	CallbackTooLarge,
 	RequestTooLarge,
+	RequestBodyReadFailed,
 	ResponseTooLarge,
 	HeaderTooLarge,
 	TooManyHeaders,
@@ -383,6 +384,21 @@ struct LinkStreamResult {
 	}
 };
 
+template <size_t CallbackStorageSize> struct LinkRequestBodyStreamT {
+	using ReadCallback = LinkCallback<
+	    size_t(size_t offset, uint8_t *destination, size_t capacity),
+	    CallbackStorageSize>;
+
+	size_t contentLength = 0;
+	ReadCallback read;
+
+	bool configured() const {
+		return static_cast<bool>(read) || contentLength > 0;
+	}
+};
+
+using LinkRequestBodyStream = LinkRequestBodyStreamT<64>;
+
 template <size_t CallbackStorageSize> struct LinkRequestT {
 	using ResponseCallback = LinkCallback<void(const LinkResponse &), CallbackStorageSize>;
 	using JsonResponseCallback = LinkCallback<void(const LinkJsonResponse &), CallbackStorageSize>;
@@ -390,11 +406,14 @@ template <size_t CallbackStorageSize> struct LinkRequestT {
 	using StreamChunkCallback =
 	    LinkCallback<LinkStreamAction(const LinkStreamChunk &), CallbackStorageSize>;
 	using StreamEndCallback = LinkCallback<void(const LinkStreamResult &), CallbackStorageSize>;
+	using RequestBodyReadCallback =
+	    typename LinkRequestBodyStreamT<CallbackStorageSize>::ReadCallback;
 
 	LinkMethod method = LinkMethod::Get;
 	const char *url = nullptr;
 	LinkHeaders headers;
 	LinkBodyView body;
+	LinkRequestBodyStreamT<CallbackStorageSize> streamBody;
 	uint32_t timeoutMs = 0;
 	LinkResponseMode responseMode = LinkResponseMode::Buffered;
 	bool parseJsonResponse = false;
@@ -431,6 +450,8 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 	LinkOwnedBuffer url;
 	LinkHeaders headers;
 	LinkBody body;
+	size_t streamBodyContentLength = 0;
+	typename Request::RequestBodyReadCallback onRequestBodyRead;
 
 	typename Request::ResponseCallback onResponse;
 	typename Request::JsonResponseCallback onJsonResponse;
@@ -447,6 +468,8 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 		url.clear();
 		headers.clear();
 		body.clear();
+		streamBodyContentLength = 0;
+		onRequestBodyRead.reset();
 		onResponse.reset();
 		onJsonResponse.reset();
 		onStreamStart.reset();
@@ -489,9 +512,39 @@ template <size_t CallbackStorageSize> struct QueuedLinkRequest {
 				return headerResult;
 			}
 		}
-		LinkResult bodyResult = linkBodyFromView(request.body, config, body);
-		if (!bodyResult) {
-			return bodyResult;
+		const bool hasStreamBody = request.streamBody.configured();
+		if (hasStreamBody && request.body.type() != LinkBodyType::None) {
+			return LinkResult::error(
+			    LinkErrorCode::RequestBodyReadFailed,
+			    "buffered and streamed request bodies are mutually exclusive"
+			);
+		}
+		if (hasStreamBody) {
+			if (!request.streamBody.read) {
+				return LinkResult::error(
+				    LinkErrorCode::RequestBodyReadFailed,
+				    "stream request body reader is required"
+				);
+			}
+			if (request.streamBody.contentLength > config.maxRequestBodySize) {
+				return LinkResult::error(
+				    LinkErrorCode::RequestTooLarge,
+				    "stream request body is too large"
+				);
+			}
+			if (request.streamBody.contentLength > static_cast<size_t>(INT_MAX)) {
+				return LinkResult::error(
+				    LinkErrorCode::RequestTooLarge,
+				    "stream request body exceeds ESP-IDF limit"
+				);
+			}
+			streamBodyContentLength = request.streamBody.contentLength;
+			onRequestBodyRead = request.streamBody.read;
+		} else {
+			LinkResult bodyResult = linkBodyFromView(request.body, config, body);
+			if (!bodyResult) {
+				return bodyResult;
+			}
 		}
 
 		id = requestId;
@@ -537,6 +590,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 	using StreamStartCallback = typename Request::StreamStartCallback;
 	using StreamChunkCallback = typename Request::StreamChunkCallback;
 	using StreamEndCallback = typename Request::StreamEndCallback;
+	using RequestBodyReadCallback = typename Request::RequestBodyReadCallback;
 
 	LinkClient() = default;
 	~LinkClient() {
@@ -593,6 +647,51 @@ template <size_t CallbackStorageSize> class LinkClient {
 			return headerResult;
 		}
 		request.body = body;
+		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "response callback is too large"
+			);
+		}
+		return fetch(request);
+	}
+
+	template <typename ReadCallbackType, typename Callback>
+	LinkResult postStreamBody(
+	    const char *url, size_t contentLength, ReadCallbackType &&read, Callback &&callback
+	) {
+		LinkHeaders headers;
+		return postStreamBody(
+		    url,
+		    headers,
+		    contentLength,
+		    std::forward<ReadCallbackType>(read),
+		    std::forward<Callback>(callback)
+		);
+	}
+
+	template <typename ReadCallbackType, typename Callback>
+	LinkResult postStreamBody(
+	    const char *url,
+	    const LinkHeaders &headers,
+	    size_t contentLength,
+	    ReadCallbackType &&read,
+	    Callback &&callback
+	) {
+		Request request;
+		request.method = LinkMethod::Post;
+		request.url = url;
+		LinkResult headerResult = request.headers.copyFrom(headers);
+		if (!headerResult) {
+			return headerResult;
+		}
+		request.streamBody.contentLength = contentLength;
+		if (!request.streamBody.read.assign(std::forward<ReadCallbackType>(read))) {
+			return LinkResult::error(
+			    LinkErrorCode::CallbackTooLarge,
+			    "request body callback is too large"
+			);
+		}
 		if (!request.onResponse.assign(std::forward<Callback>(callback))) {
 			return LinkResult::error(
 			    LinkErrorCode::CallbackTooLarge,
@@ -747,6 +846,7 @@ template <size_t CallbackStorageSize> class LinkClient {
 #if defined(ESP32)
 		Strata::FreeRTOS::Task task;
 		WorkerHttpSession http;
+		LinkOwnedBuffer streamScratch;
 #endif
 	};
 
@@ -783,6 +883,13 @@ template <size_t CallbackStorageSize> class LinkClient {
 	void recordHttpClientReused();
 	void recordTransportConnected();
 	void recordTransportDisconnected();
+	LinkError performStreamingRequestBody(
+	    WorkerRecord &worker,
+	    esp_http_client_handle_t client,
+	    QueuedRequest &request,
+	    const char *currentUrl,
+	    HttpEventContext &context
+	);
 #endif
 
 	static void taskEntry(void *arg);

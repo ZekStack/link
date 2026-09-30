@@ -122,7 +122,11 @@ Run at least one real HTTP and one verified HTTPS request on every hardware fami
 - cross-origin authorization headers are stripped;
 - final response limits are enforced;
 - large intermediate redirect bodies do not prevent an otherwise valid redirect;
-- fresh GET and JSON POST requests do not fail while clearing absent request state.
+- fresh GET and JSON POST requests do not fail while clearing absent request state;
+- streamed request bodies cover zero length, sub-chunk, exact-chunk, non-multiple, and multi-megabyte payloads;
+- the server-observed `Content-Length` and payload hash match the streamed source;
+- source failure, transport failure, timeout, and shutdown during upload produce one terminal callback and do not leave a persistent worker client unusable;
+- streamed request bodies work with both buffered and streamed responses.
 
 ## Release evidence
 

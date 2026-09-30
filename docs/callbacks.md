@@ -41,3 +41,9 @@ Callbacks run inside the Link worker task that handled the request. If `maxConcu
 Queued cancellation callbacks also run inside Link worker tasks during shutdown. Do not call `deinit()` or destroy the `Link` instance from a Link callback: both shutdown paths wait for workers, including the worker currently executing that callback.
 
 Do not hold long blocking work in Link callbacks. Forward large processing to another task when needed.
+
+## Request-body readers
+
+Streaming request-body readers use the same fixed inline `LinkCallback` storage as response callbacks. The reader is copied into the queued request. State referenced through captured pointers or references remains application-owned and must stay valid until the request reaches its terminal response callback.
+
+Readers run synchronously inside the Link worker that owns the HTTP transaction. They should fill the supplied destination promptly and must not call `deinit()` or destroy the active `Link` instance.

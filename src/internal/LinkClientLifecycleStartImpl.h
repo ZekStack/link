@@ -172,6 +172,7 @@ LinkResult LinkClient<CallbackStorageSize>::init(const LinkConfig &config) {
 			worker.active = true;
 			worker.readyForDelete = false;
 			worker.http.originHost.setPlacement(config.memory.allocation);
+			worker.streamScratch.setPlacement(config.memory.allocation);
 			worker.http.eventContext.owner = this;
 			worker.http.eventContext.streamInfo.headers.configurePlacement(config.memory.allocation
 			);
