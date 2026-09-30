@@ -56,7 +56,7 @@ The reader callback contract is:
 
 Link copies the reader callback into the queued request, but objects referenced by that callback remain application-owned and must outlive the request's terminal response callback.
 
-`maxRequestBodySize` is the logical limit for buffered and streamed request bodies. Raising it for a streamed request does not allocate that amount of RAM. Link allocates only a `streamChunkSize` scratch buffer while the worker performs the upload.
+`maxRequestBodySize` is the logical limit for buffered and streamed request bodies. Raising it for a streamed request does not allocate that amount of RAM. Link lazily allocates one `streamChunkSize` scratch buffer per worker that performs a streamed upload and reuses it for later uploads.
 
 Link owns HTTP `Content-Length` framing for streamed bodies from `streamBody.contentLength`.
 
