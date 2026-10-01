@@ -22,7 +22,7 @@ If the HTTP body exceeds the response body limit, Link returns `ResponseTooLarge
 
 A caller-provided request `JsonDocument` remains caller-owned. Link reads and serializes that document during submission but does not replace its allocator.
 
-A parsed response document is different: `LinkJsonResponse::json` is created by Link, so v0.2.0 constructs it with `Strata::ArduinoJson::Allocator` using `LinkConfig::memory.allocation`.
+A parsed response document is different: `LinkJsonResponse::json` is created by Link, so v0.2.1 constructs it with `Strata::ArduinoJson::Allocator` using `LinkConfig::memory.allocation`.
 
 This means parsed ArduinoJson nodes and copied strings follow the same Strata placement policy as Link-owned response buffers and headers.
 

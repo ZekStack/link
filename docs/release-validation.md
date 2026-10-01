@@ -2,7 +2,7 @@
 
 A successful GitHub Actions run verifies host logic, source ownership constraints, metadata, formatting, and compilation across the supported ESP32 targets. It does not replace physical-device qualification of FreeRTOS scheduling, Strata placement, network behavior, TLS reuse, or heap integrity.
 
-The following validation is required before publishing `v0.2.0`.
+The following validation is required before publishing `v0.2.1`.
 
 ## Automated release gates
 
@@ -25,7 +25,7 @@ The source audit must reject direct heap-capability allocation, raw owned alloca
 On hardware with PSRAM, qualify at least these configurations:
 
 ```cpp
-// Default v0.2.0 policy
+// Default v0.2.1 policy
 config.memory.allocation = Strata::Placement::PreferExternal;
 config.memory.taskStack = Strata::Placement::PreferExternal;
 
@@ -62,7 +62,7 @@ Run the stress test under both `Internal` and `PreferExternal` task-stack placem
 
 ## Worker deletion handoff
 
-The v0.2.0 task lifecycle must specifically be observed under repeated shutdown:
+The v0.2.1 task lifecycle must specifically be observed under repeated shutdown:
 
 1. a worker receives its stop signal only after accepted request messages ahead of it;
 2. the worker cleans persistent HTTP state;
@@ -141,4 +141,4 @@ Attach to the release pull request or a linked issue:
 - diagnostics showing requested vs observed placement;
 - any known limitations or deviations.
 
-Do not tag `v0.2.0` until the automated gates and physical qualification are complete.
+Do not tag `v0.2.1` until the automated gates and physical qualification are complete.

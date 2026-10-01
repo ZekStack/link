@@ -1,6 +1,6 @@
 # Memory
 
-Link `v0.2.0` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.2`.
+Link `v0.2.1` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.2`.
 
 ## Policy
 
@@ -121,12 +121,12 @@ An invalid configuration is rejected by `init()`. An oversized request-specific 
 
 ## v0.1.1 migration
 
-| v0.1.1 | v0.2.0 |
-| --- | --- |
-| `LinkStackType::Auto` | `Strata::Placement::PreferExternal` |
-| `LinkStackType::Internal` | `Strata::Placement::Internal` |
-| `LinkStackType::Psram` | `Strata::Placement::RequireExternal` |
-| `config.stackType` | `config.memory.taskStack` |
-| implicit payload PSRAM preference | `config.memory.allocation` |
+| v0.1.1                            | v0.2.1                               |
+| --------------------------------- | ------------------------------------ |
+| `LinkStackType::Auto`             | `Strata::Placement::PreferExternal`  |
+| `LinkStackType::Internal`         | `Strata::Placement::Internal`        |
+| `LinkStackType::Psram`            | `Strata::Placement::RequireExternal` |
+| `config.stackType`                | `config.memory.taskStack`            |
+| implicit payload PSRAM preference | `config.memory.allocation`           |
 
-`LinkStackType` is removed in v0.2.0; no compatibility alias is retained.
+`LinkStackType` is removed in v0.2.1; no compatibility alias is retained.

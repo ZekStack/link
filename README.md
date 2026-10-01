@@ -19,7 +19,7 @@ Link helps Arduino ESP32 firmware communicate with APIs and backend services usi
 
 ## Dependency
 
-Link `v0.2.0` requires Strata `v0.1.2` and ArduinoJson v7.
+Link `v0.2.1` requires Strata `v0.1.2` and ArduinoJson v7.
 
 ### PlatformIO
 
@@ -30,7 +30,7 @@ board = esp32dev
 framework = arduino
 
 lib_deps =
-  https://github.com/ZekStack/link.git#v0.2.0
+  https://github.com/ZekStack/link.git#v0.2.1
   bblanchon/ArduinoJson@>=7.0.0
 
 build_flags =
@@ -121,11 +121,11 @@ config.memory.allocation = Strata::Placement::RequireExternal;
 config.memory.taskStack = Strata::Placement::RequireExternal;
 ```
 
-## v0.1.1 to v0.2.0 migration
+## v0.1.1 to v0.2.1 migration
 
-`v0.2.0` intentionally removes the Link-specific stack enum instead of carrying compatibility aliases.
+`v0.2.1` intentionally removes the Link-specific stack enum instead of carrying compatibility aliases.
 
-| Link v0.1.1 | Link v0.2.0 |
+| Link v0.1.1 | Link v0.2.1 |
 | --- | --- |
 | `LinkStackType::Auto` | `Strata::Placement::PreferExternal` |
 | `LinkStackType::Internal` | `Strata::Placement::Internal` |
@@ -198,7 +198,7 @@ Serial.printf(
 | [`docs/streaming.md`](docs/streaming.md) | Streaming downloads and cancellation. |
 | [`docs/memory.md`](docs/memory.md) | Strata policy, bounded memory, diagnostics, and explicit copy behavior. |
 | [`docs/persistent-http.md`](docs/persistent-http.md) | Optional per-worker persistent HTTP clients. |
-| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.2.0 qualification. |
+| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.2.1 qualification. |
 
 ## Compatibility
 
