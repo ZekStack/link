@@ -10,12 +10,12 @@ Link helps Arduino ESP32 firmware communicate with APIs and backend services usi
 
 ## Why use Link?
 
-* **Fetch-style requests** - submit `get`, `post`, `postStreamBody`, `getJson`, `postJson`, or `getStream` work from normal FreeRTOS tasks.
-* **Concurrent workers** - run more than one HTTP request at a time with a bounded worker pool.
-* **Consistent memory policy** - `Strata::MemoryPolicy` controls Link-owned allocations and worker task stacks.
-* **Bounded payloads** - accepted URLs, bodies, headers, serialized JSON, callbacks, and streaming behavior have explicit limits.
-* **Strata-owned FreeRTOS storage** - worker task stacks/TCBs, dispatch queue storage, and mutex control blocks use static Strata ownership.
-* **Clear errors** - operations return `LinkResult`; HTTP status codes remain separate from transport failures.
+- **Fetch-style requests** - submit `get`, `post`, `postStreamBody`, `getJson`, `postJson`, or `getStream` work from normal FreeRTOS tasks.
+- **Concurrent workers** - run more than one HTTP request at a time with a bounded worker pool.
+- **Consistent memory policy** - `Strata::MemoryPolicy` controls Link-owned allocations and worker task stacks.
+- **Bounded payloads** - accepted URLs, bodies, headers, serialized JSON, callbacks, and streaming behavior have explicit limits.
+- **Strata-owned FreeRTOS storage** - worker task stacks/TCBs, dispatch queue storage, and mutex control blocks use static Strata ownership.
+- **Clear errors** - operations return `LinkResult`; HTTP status codes remain separate from transport failures.
 
 ## Dependency
 
@@ -125,13 +125,13 @@ config.memory.taskStack = Strata::Placement::RequireExternal;
 
 `v0.2.1` intentionally removes the Link-specific stack enum instead of carrying compatibility aliases.
 
-| Link v0.1.1 | Link v0.2.1 |
-| --- | --- |
-| `LinkStackType::Auto` | `Strata::Placement::PreferExternal` |
-| `LinkStackType::Internal` | `Strata::Placement::Internal` |
-| `LinkStackType::Psram` | `Strata::Placement::RequireExternal` |
-| `config.stackType` | `config.memory.taskStack` |
-| implicit PSRAM-preferred payload allocation | `config.memory.allocation` |
+| Link v0.1.1                                 | Link v0.2.1                          |
+| ------------------------------------------- | ------------------------------------ |
+| `LinkStackType::Auto`                       | `Strata::Placement::PreferExternal`  |
+| `LinkStackType::Internal`                   | `Strata::Placement::Internal`        |
+| `LinkStackType::Psram`                      | `Strata::Placement::RequireExternal` |
+| `config.stackType`                          | `config.memory.taskStack`            |
+| implicit PSRAM-preferred payload allocation | `config.memory.allocation`           |
 
 ## Concurrency and shutdown
 
@@ -142,20 +142,20 @@ Link uses a Strata task-only dispatch queue. A successful submission owns a requ
 
 Other lifecycle rules remain unchanged:
 
-* Protect shared application state touched from callbacks.
-* Requests start in queue order but may complete out of order with multiple workers.
-* User callbacks are never called while Link's runtime mutex is held.
-* New submissions return `Stopping` after shutdown begins.
-* Every accepted request receives exactly one terminal callback before successful `deinit()` returns.
-* A timed-out `deinit()` leaves Link in `Stopping` with worker-owned storage intact so a later call can continue cleanup.
-* Do not call `deinit()` or destroy a `Link` instance from one of its callbacks.
+- Protect shared application state touched from callbacks.
+- Requests start in queue order but may complete out of order with multiple workers.
+- User callbacks are never called while Link's runtime mutex is held.
+- New submissions return `Stopping` after shutdown begins.
+- Every accepted request receives exactly one terminal callback before successful `deinit()` returns.
+- A timed-out `deinit()` leaves Link in `Stopping` with worker-owned storage intact so a later call can continue cleanup.
+- Do not call `deinit()` or destroy a `Link` instance from one of its callbacks.
 
 ## Ownership boundaries
 
 Link routes memory it owns through Strata. Two allocation domains remain intentionally outside this boundary:
 
-* a caller-provided request `JsonDocument`, which Link only reads/serializes during submission;
-* allocations internal to ESP-IDF's `esp_http_client` implementation.
+- a caller-provided request `JsonDocument`, which Link only reads/serializes during submission;
+- allocations internal to ESP-IDF's `esp_http_client` implementation.
 
 `LinkJsonResponse::json`, by contrast, is created by Link and uses Strata's ArduinoJson allocator with `memory.allocation`.
 
@@ -180,39 +180,39 @@ Serial.printf(
 
 ## Important notes
 
-* HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
-* Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in.
-* Caller-supplied headers are stripped after an origin change. Intermediate redirect bodies are discarded.
-* Buffered request body views are copied into owned storage before submission returns. Streaming request bodies copy only their reader callback and declared length; referenced source state must remain valid until the terminal response callback.
-* `LinkJsonResponse::json` and streaming chunk data are callback-scoped unless copied by the application.
+- HTTPS uses the ESP-IDF certificate bundle when available. If the project/core does not provide usable certificate bundle support, verified HTTPS fails with `TlsFailed`.
+- Redirect following is limited to GET requests with absolute `http://` or `https://` `Location` headers. Same-origin redirects are allowed by default; cross-origin and HTTPS-to-HTTP redirects require explicit opt-in.
+- Caller-supplied headers are stripped after an origin change. Intermediate redirect bodies are discarded.
+- Buffered request body views are copied into owned storage before submission returns. Streaming request bodies copy only their reader callback and declared length; referenced source state must remain valid until the terminal response callback.
+- `LinkJsonResponse::json` and streaming chunk data are callback-scoped unless copied by the application.
 
 ## Documentation
 
-| Document | Description |
-| --- | --- |
-| [`docs/api.md`](docs/api.md) | Public classes, configuration, result types, diagnostics, and ownership. |
-| [`docs/callbacks.md`](docs/callbacks.md) | Callback storage, binding, and execution context. |
-| [`docs/concurrency.md`](docs/concurrency.md) | Dispatch queue, worker pool, lifecycle, and completion guarantees. |
-| [`docs/errors.md`](docs/errors.md) | Error codes and HTTP status behavior. |
-| [`docs/json.md`](docs/json.md) | ArduinoJson helpers, Strata allocation, and JSON lifetime rules. |
-| [`docs/streaming.md`](docs/streaming.md) | Streaming downloads and cancellation. |
-| [`docs/memory.md`](docs/memory.md) | Strata policy, bounded memory, diagnostics, and explicit copy behavior. |
-| [`docs/persistent-http.md`](docs/persistent-http.md) | Optional per-worker persistent HTTP clients. |
-| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.2.1 qualification. |
+| Document                                                   | Description                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------ |
+| [`docs/api.md`](docs/api.md)                               | Public classes, configuration, result types, diagnostics, and ownership. |
+| [`docs/callbacks.md`](docs/callbacks.md)                   | Callback storage, binding, and execution context.                        |
+| [`docs/concurrency.md`](docs/concurrency.md)               | Dispatch queue, worker pool, lifecycle, and completion guarantees.       |
+| [`docs/errors.md`](docs/errors.md)                         | Error codes and HTTP status behavior.                                    |
+| [`docs/json.md`](docs/json.md)                             | ArduinoJson helpers, Strata allocation, and JSON lifetime rules.         |
+| [`docs/streaming.md`](docs/streaming.md)                   | Streaming downloads and cancellation.                                    |
+| [`docs/memory.md`](docs/memory.md)                         | Strata policy, bounded memory, diagnostics, and explicit copy behavior.  |
+| [`docs/persistent-http.md`](docs/persistent-http.md)       | Optional per-worker persistent HTTP clients.                             |
+| [`docs/release-validation.md`](docs/release-validation.md) | Automated gates and physical v0.2.1 qualification.                       |
 
 ## Compatibility
 
-| Item | Support |
-| --- | --- |
-| Framework | Arduino ESP32 |
-| Platform | `espressif32` |
-| Language | C++20 |
-| Networking | ESP-IDF `esp_http_client` |
-| HTTPS | ESP-IDF certificate bundle when available |
-| Memory policy | Strata `v0.1.2` |
-| JSON | ArduinoJson `>= 7.0.0` |
-| Exceptions | Not used by Link |
-| Status | `0.2.0` |
+| Item          | Support                                   |
+| ------------- | ----------------------------------------- |
+| Framework     | Arduino ESP32                             |
+| Platform      | `espressif32`                             |
+| Language      | C++20                                     |
+| Networking    | ESP-IDF `esp_http_client`                 |
+| HTTPS         | ESP-IDF certificate bundle when available |
+| Memory policy | Strata `v0.1.2`                           |
+| JSON          | ArduinoJson `>= 7.0.0`                    |
+| Exceptions    | Not used by Link                          |
+| Status        | `0.2.1`                                   |
 
 ## License
 

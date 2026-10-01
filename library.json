@@ -1,6 +1,6 @@
 {
   "name": "Link",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Async HTTP client library for ESP32 with bounded memory and fetch-style requests.",
   "keywords": [
     "esp32",

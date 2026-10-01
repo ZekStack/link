@@ -8,7 +8,7 @@ The following validation is required before publishing `v0.2.1`.
 
 The tagged commit must pass:
 
-- release metadata validation for `0.2.0`;
+- release metadata validation for `0.2.1`;
 - clang-format validation;
 - embedded source audit preventing direct Link-owned allocation and dynamic FreeRTOS ownership paths;
 - general host logic tests linked against Strata `v0.1.2` generic backend;
