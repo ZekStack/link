@@ -116,6 +116,7 @@ struct LinkConfig {
 	size_t maxHeaderValueSize = 512;
 	size_t maxTotalHeaderSize = 4096;
 	size_t streamChunkSize = 1024;
+	size_t httpTransmitBufferSize = 0;
 
 	bool followRedirects = true;
 	bool allowCrossOriginRedirects = false;
