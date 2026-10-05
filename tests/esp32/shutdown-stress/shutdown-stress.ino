@@ -8,7 +8,7 @@ namespace {
 
 constexpr size_t kRoundsPerMode = 100;
 constexpr size_t kProducerCount = 3;
-constexpr const char *kTarget = "http://192.0.2.1/link-lifecycle-stress";
+constexpr const char *kTarget = "http://192.0.2.2/link-lifecycle-stress";
 
 Link link;
 std::atomic_bool producersRunning{false};

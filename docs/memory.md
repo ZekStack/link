@@ -127,7 +127,7 @@ An invalid configuration is rejected by `init()`. An oversized request-specific 
 
 ## v0.1.1 migration
 
-| v0.1.1                            | v0.2.1                               |
+| v0.1.1                            | v0.2.2                               |
 | --------------------------------- | ------------------------------------ |
 | `LinkStackType::Auto`             | `Strata::Placement::PreferExternal`  |
 | `LinkStackType::Internal`         | `Strata::Placement::Internal`        |
@@ -135,4 +135,4 @@ An invalid configuration is rejected by `init()`. An oversized request-specific 
 | `config.stackType`                | `config.memory.taskStack`            |
 | implicit payload PSRAM preference | `config.memory.allocation`           |
 
-`LinkStackType` is removed in v0.2.1; no compatibility alias is retained.
+`LinkStackType` is removed in v0.2.2; no compatibility alias is retained.

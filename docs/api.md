@@ -33,7 +33,7 @@ config.memory.allocation = Strata::Placement::PreferExternal;
 config.memory.taskStack = Strata::Placement::PreferExternal;
 ```
 
-`memory.allocation` applies to Link-owned movable storage. `memory.taskStack` applies to Link worker stacks. `LinkStackType` was removed in v0.2.1.
+`memory.allocation` applies to Link-owned movable storage. `memory.taskStack` applies to Link worker stacks. `LinkStackType` was removed in v0.2.2.
 
 `LinkResult` is returned by setup and submission calls. A false result means the request was not accepted or the lifecycle operation failed.
 
@@ -163,7 +163,7 @@ Diagnostics are retained after successful `deinit()` so shutdown/leak invariants
 
 ## Worker ownership
 
-Link v0.2.1 creates worker tasks with `Strata::FreeRTOS::Task` and dispatches request-slot indices through `Strata::FreeRTOS::Queue`.
+Link v0.2.2 creates worker tasks with `Strata::FreeRTOS::Task` and dispatches request-slot indices through `Strata::FreeRTOS::Queue`.
 
 On shutdown a worker does not delete itself. It cleans up persistent HTTP state, marks its task ready for external deletion, and suspends. `deinit()` then resets the Strata task owner from the caller context, allowing Strata to delete the FreeRTOS task and release its static stack and task control block safely.
 
