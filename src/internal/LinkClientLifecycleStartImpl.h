@@ -47,6 +47,12 @@ LinkResult LinkClient<CallbackStorageSize>::validateConfig(const LinkConfig &con
 		    "stream chunk size exceeds ESP-IDF limit"
 		);
 	}
+	if (config.httpTransmitBufferSize > static_cast<size_t>(INT_MAX)) {
+		return LinkResult::error(
+		    LinkErrorCode::InvalidConfig,
+		    "HTTP transmit buffer size exceeds ESP-IDF limit"
+		);
+	}
 	if (config.maxHeaderNameSize > config.maxTotalHeaderSize ||
 	    config.maxHeaderValueSize > config.maxTotalHeaderSize - config.maxHeaderNameSize) {
 		return LinkResult::error(LinkErrorCode::InvalidConfig, "header total limit is too small");
