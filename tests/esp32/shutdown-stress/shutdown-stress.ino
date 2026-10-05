@@ -98,6 +98,7 @@ bool runMode(LinkConnectionMode mode) {
 	config.queueSize = 8;
 	config.maxConcurrentRequests = 2;
 	config.defaultTimeoutMs = 250;
+	config.httpTransmitBufferSize = 2048;
 	config.connectionMode = mode;
 	config.persistentIdleTimeoutMs = 1000;
 	config.persistentMaxRequestsPerHandle = 32;
