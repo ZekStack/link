@@ -25,7 +25,7 @@ LinkClient<96> link;
 
 `LinkConfig` controls Strata memory policy, worker tasks, in-flight request capacity, connection reuse, timeouts, redirects, and payload limits.
 
-The v0.2.1 memory configuration is:
+The memory configuration is:
 
 ```cpp
 LinkConfig config;
@@ -79,6 +79,14 @@ client.getStream(url, onStart, onChunk, onEnd);
 ```
 
 An explicit `LinkRequestT::timeoutMs` value of zero selects `LinkConfig::defaultTimeoutMs`. Every effective timeout must fit the ESP-IDF signed `int` timeout range. An oversized request-specific value returns `LinkErrorCode::InvalidTimeout` before queue publication.
+
+## HTTP buffers
+
+`LinkConfig::streamChunkSize` controls Link's streamed-upload scratch buffer and the ESP-IDF HTTP receive buffer. `LinkConfig::httpTransmitBufferSize` independently controls ESP-IDF's HTTP transmit buffer used for the request line and request headers.
+
+`httpTransmitBufferSize` defaults to `0`, which delegates to the ESP-IDF default. Set a larger value when requests carry enough custom headers, authorization data, cookies, or other metadata that ESP-IDF cannot serialize them comfortably with its default TX buffer. The value is passed to `esp_http_client_config_t::buffer_size_tx` and must fit in ESP-IDF's signed `int` range.
+
+`maxTotalHeaderSize` remains Link's logical bound for owned header storage. Raising it does not enlarge the ESP-IDF transmit buffer, and raising `httpTransmitBufferSize` does not change Link's accepted header limits.
 
 ## Headers and bodies
 

@@ -198,6 +198,7 @@ esp_http_client_handle_t LinkClient<CallbackStorageSize>::createHttpClient(
 	httpConfig.user_data = &context;
 	httpConfig.disable_auto_redirect = true;
 	httpConfig.buffer_size = static_cast<int>(_config.streamChunkSize);
+	httpConfig.buffer_size_tx = static_cast<int>(_config.httpTransmitBufferSize);
 #if LINK_HAS_CRT_BUNDLE
 	if (link_internal_http::isHttps(url)) {
 		httpConfig.crt_bundle_attach = esp_crt_bundle_attach;

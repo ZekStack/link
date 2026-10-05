@@ -506,6 +506,13 @@ void testInvalidConfigBounds() {
 	LinkConfig config;
 	config.queueSize = 1;
 	config.maxConcurrentRequests = 1;
+	assert(config.httpTransmitBufferSize == 0);
+	config.httpTransmitBufferSize = 2048;
+	assert(link.init(config));
+	assert(link.deinit());
+	config = LinkConfig{};
+	config.queueSize = 1;
+	config.maxConcurrentRequests = 1;
 
 	config.defaultTimeoutMs = static_cast<uint32_t>(INT_MAX) + 1U;
 	assert(link.init(config).code == LinkErrorCode::InvalidConfig);
@@ -519,6 +526,17 @@ void testInvalidConfigBounds() {
 		config.queueSize = 1;
 		config.maxConcurrentRequests = 1;
 		config.streamChunkSize = static_cast<size_t>(INT_MAX) + 1U;
+		assert(link.init(config).code == LinkErrorCode::InvalidConfig);
+		config = LinkConfig{};
+		config.queueSize = 1;
+		config.maxConcurrentRequests = 1;
+		config.httpTransmitBufferSize = static_cast<size_t>(INT_MAX);
+		assert(link.init(config));
+		assert(link.deinit());
+		config = LinkConfig{};
+		config.queueSize = 1;
+		config.maxConcurrentRequests = 1;
+		config.httpTransmitBufferSize = static_cast<size_t>(INT_MAX) + 1U;
 		assert(link.init(config).code == LinkErrorCode::InvalidConfig);
 	}
 

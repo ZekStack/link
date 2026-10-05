@@ -1,6 +1,6 @@
 # Memory
 
-Link `v0.2.1` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.2`.
+Link `v0.2.2` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.2`.
 
 ## Policy
 
@@ -68,6 +68,7 @@ config.maxHeaderNameSize = 64;
 config.maxHeaderValueSize = 512;
 config.maxTotalHeaderSize = 4096;
 config.streamChunkSize = 1024;
+config.httpTransmitBufferSize = 0;
 ```
 
 `queueSize` is the maximum number of accepted in-flight requests, including queued and active requests. Active requests retain their slot until completion, so `queueSize` must be at least `maxConcurrentRequests`.
@@ -75,6 +76,10 @@ config.streamChunkSize = 1024;
 Public `LinkBodyView` factories do not allocate. During submission, Link validates buffered body limits and copies the body into owned queue storage before returning. The source text, bytes, or request `JsonDocument` only needs to remain valid until the submission call completes.
 
 Streaming request bodies copy only the reader callback and declared content length into the queued request. Each worker lazily allocates one `streamChunkSize` scratch buffer on its first streamed upload and retains it for reuse until Link is deinitialized, so payload size does not determine Link-owned RAM usage. Application objects referenced by the reader callback must remain valid until the terminal response callback.
+
+`httpTransmitBufferSize` controls ESP-IDF's HTTP transmit buffer used to serialize the request line and request headers. A value of `0` delegates to ESP-IDF's default, preserving existing behavior. This buffer is allocated internally by `esp_http_client`, is not routed through Strata, and is independent of both `streamChunkSize` and `maxTotalHeaderSize`.
+
+Increasing the transmit buffer has a per-active-client memory cost. For example, if ESP-IDF's default is 512 bytes, configuring 2048 bytes with three simultaneous HTTP client handles can consume roughly `(2048 - 512) * 3 = 4608` additional bytes while all three handles exist. Configure it only when request headers need more contiguous serialization space.
 
 ## Explicit copy behavior
 
@@ -115,7 +120,8 @@ Some ESP-IDF HTTP client parameters use signed `int` values. Link validates them
 - `defaultTimeoutMs` must be between `1` and `INT_MAX`;
 - an explicit per-request timeout must be between `1` and `INT_MAX`;
 - `maxRequestBodySize` must not exceed `INT_MAX`;
-- `streamChunkSize` must not exceed `INT_MAX`.
+- `streamChunkSize` must not exceed `INT_MAX`;
+- `httpTransmitBufferSize` may be `0` to use the ESP-IDF default and otherwise must not exceed `INT_MAX`.
 
 An invalid configuration is rejected by `init()`. An oversized request-specific timeout is rejected before queue publication.
 

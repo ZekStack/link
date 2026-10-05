@@ -121,6 +121,17 @@ config.memory.allocation = Strata::Placement::RequireExternal;
 config.memory.taskStack = Strata::Placement::RequireExternal;
 ```
 
+### HTTP transmit buffer
+
+Large request-header sets can require more ESP-IDF transmit-buffer space than its default provides. Configure that independently from Link's streaming and logical header limits:
+
+```cpp
+LinkConfig config;
+config.httpTransmitBufferSize = 2048;
+```
+
+`httpTransmitBufferSize = 0` keeps the ESP-IDF default. The buffer is owned and allocated internally by `esp_http_client`, not by Strata. It is intentionally separate from `streamChunkSize` and `maxTotalHeaderSize`, so increasing a logical header limit or changing streaming chunk sizes does not silently increase per-client HTTP TX memory.
+
 ## v0.1.1 to v0.2.1 migration
 
 `v0.2.1` intentionally removes the Link-specific stack enum instead of carrying compatibility aliases.
@@ -212,7 +223,7 @@ Serial.printf(
 | Memory policy | Strata `v0.1.2`                           |
 | JSON          | ArduinoJson `>= 7.0.0`                    |
 | Exceptions    | Not used by Link                          |
-| Status        | `0.2.1`                                   |
+| Status        | `0.2.2`                                   |
 
 ## License
 
