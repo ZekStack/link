@@ -1,6 +1,6 @@
 # Memory
 
-Link `v0.2.2` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.2`.
+Link `v0.2.2` routes Link-owned dynamic memory and owned FreeRTOS storage through Strata `v0.1.4`.
 
 ## Policy
 
