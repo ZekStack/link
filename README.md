@@ -1,5 +1,7 @@
 # Link
 
+> Current version: **v0.3.0**, pinned Strata **v0.1.4**.
+
 Link is an async HTTP client library for ESP32 with fetch-style requests and bounded memory.
 
 Link helps Arduino ESP32 firmware communicate with APIs and backend services using thread-safe request submission, a bounded worker pool, explicit request/response limits, and result-based errors. Link owns HTTP/request lifecycle policy while [Strata](https://github.com/ZekStack/strata) owns Link's memory placement and low-level FreeRTOS storage.
@@ -19,7 +21,7 @@ Link helps Arduino ESP32 firmware communicate with APIs and backend services usi
 
 ## Dependency
 
-Link `v0.2.2` requires Strata `v0.1.2` and ArduinoJson v7.
+Link `v0.3.0` requires Strata `v0.1.4` and ArduinoJson v7.
 
 ### PlatformIO
 
@@ -30,7 +32,7 @@ board = esp32dev
 framework = arduino
 
 lib_deps =
-  https://github.com/ZekStack/link.git#v0.2.2
+  https://github.com/ZekStack/link.git#v0.3.0
   bblanchon/ArduinoJson@>=7.0.0
 
 build_flags =
@@ -39,7 +41,7 @@ build_unflags =
   -std=gnu++11
 ```
 
-Link's `library.json` pins Strata `v0.1.2`, so PlatformIO resolves it as a transitive dependency.
+Link's `library.json` pins Strata `v0.1.4`, so PlatformIO resolves it as a transitive dependency.
 
 ### Arduino IDE
 
@@ -50,7 +52,7 @@ Arduino/libraries/Strata
 Arduino/libraries/Link
 ```
 
-Use Strata `v0.1.2` or a compatible later release.
+Use Strata `v0.1.4` or a compatible later release.
 
 ## Quick start
 
@@ -220,7 +222,7 @@ Serial.printf(
 | Language      | C++20                                     |
 | Networking    | ESP-IDF `esp_http_client`                 |
 | HTTPS         | ESP-IDF certificate bundle when available |
-| Memory policy | Strata `v0.1.2`                           |
+| Memory policy | Strata `v0.1.4`                           |
 | JSON          | ArduinoJson `>= 7.0.0`                    |
 | Exceptions    | Not used by Link                          |
 | Status        | `0.2.2`                                   |

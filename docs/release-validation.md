@@ -11,9 +11,9 @@ The tagged commit must pass:
 - release metadata validation for `0.2.2`;
 - clang-format validation;
 - embedded source audit preventing direct Link-owned allocation and dynamic FreeRTOS ownership paths;
-- general host logic tests linked against Strata `v0.1.2` generic backend;
-- persistent-client host logic tests linked against Strata `v0.1.2`;
-- all examples under PIOArduino on ESP32, ESP32-S3, ESP32-C3, and ESP32-P4 with Strata `v0.1.2`;
+- general host logic tests linked against Strata `v0.1.4` generic backend;
+- persistent-client host logic tests linked against Strata `v0.1.4`;
+- all examples under PIOArduino on ESP32, ESP32-S3, ESP32-C3, and ESP32-P4 with Strata `v0.1.4`;
 - all examples under Arduino CLI on the same target families with Strata installed in the sketchbook;
 - compilation of the concurrent lifecycle stress sketch;
 - ArduinoJson `7.0.0` coverage in PIOArduino and current ArduinoJson v7 coverage in Arduino CLI.
